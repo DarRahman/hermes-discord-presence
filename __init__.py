@@ -3,7 +3,7 @@ Hermes Agent - Discord Rich Presence (RPC) Plugin
 Feature Branch: feature/enhanced-presence
 
 Provides clean, polished, real-time Discord Rich Presence with session titles,
-model name, token counters, workspace/git context, and live status activity.
+model name, token counters, and live status activity.
 
 Author: Badar Rahman
 License: MIT
@@ -11,7 +11,6 @@ License: MIT
 
 import os
 import sqlite3
-import subprocess
 import threading
 import time
 from typing import Optional, Tuple, Dict, Any
@@ -38,26 +37,6 @@ def _format_tokens(count: int) -> str:
     elif count >= 1_000:
         return f"{count / 1_000:.1f}k"
     return str(count)
-
-
-def _get_git_branch_fallback(folder_path: str) -> Optional[str]:
-    """Fallback git branch lookup using git CLI if DB field is null."""
-    if not folder_path or not os.path.exists(folder_path):
-        return None
-    try:
-        res = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=folder_path,
-            capture_output=True,
-            text=True,
-            timeout=1
-        )
-        if res.returncode == 0:
-            branch = res.stdout.strip()
-            return branch if branch and branch != "HEAD" else None
-    except Exception:
-        pass
-    return None
 
 
 class DiscordRPCPlugin:
@@ -96,13 +75,11 @@ class DiscordRPCPlugin:
         self.last_state_key = None
 
     def get_active_session_details(self) -> Dict[str, Any]:
-        """Query active session metadata (title, model, project, branch, tokens) from SQLite."""
+        """Query active session metadata (title, model, tokens) from SQLite."""
         db_path = _get_database_path()
         details = {
             "title": "Active Workspace",
             "model": "Hermes Agent",
-            "project": "",
-            "branch": "",
             "total_tokens": 0
         }
 
@@ -111,7 +88,7 @@ class DiscordRPCPlugin:
                 conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
                 cursor = conn.cursor()
                 row = cursor.execute(
-                    "SELECT s.title, s.model, s.cwd, s.git_branch, "
+                    "SELECT s.title, s.model, "
                     "       COALESCE(s.input_tokens, 0) + COALESCE(s.output_tokens, 0) AS total_tokens "
                     "FROM messages m "
                     "JOIN sessions s ON m.session_id = s.id "
@@ -123,16 +100,7 @@ class DiscordRPCPlugin:
                 if row:
                     if row[0]: details["title"] = str(row[0])
                     if row[1]: details["model"] = str(row[1])
-                    
-                    cwd_path = str(row[2]) if row[2] else os.getcwd()
-                    details["project"] = os.path.basename(cwd_path.rstrip(r"\/"))
-                    
-                    # Read git branch from DB or via git CLI fallback
-                    branch = str(row[3]) if row[3] else _get_git_branch_fallback(cwd_path)
-                    if branch:
-                        details["branch"] = branch
-                        
-                    if row[4]: details["total_tokens"] = int(row[4])
+                    if row[2]: details["total_tokens"] = int(row[2])
 
                 conn.close()
             except Exception:
@@ -156,29 +124,19 @@ class DiscordRPCPlugin:
                 raw_model = data["model"]
                 tokens_str = _format_tokens(data["total_tokens"])
                 
-                # Line 1 (Details): Activity icon + Session title
-                if self.current_status == "Thinking":
-                    details_str = f"🧠 Thinking... │ 💬 {title}"
-                elif self.current_status.startswith("Running"):
-                    details_str = f"⚡ {self.current_status} │ 💬 {title}"
-                elif self.current_status == "Processing":
-                    details_str = f"⚙️ Processing... │ 💬 {title}"
+                # Line 1 (Details): Clean bracketed status
+                if self.current_status != "Active" and self.current_status != "Idle":
+                    details_str = f"[{self.current_status}] {title}"
                 else:
-                    details_str = f"💬 Session: {title}"
+                    details_str = f"Session: {title}"
 
-                # Line 2 (State): Model + Tokens + Project/Branch (raw model preserved)
-                state_parts = [f"🤖 {raw_model}"]
+                # Line 2 (State): Model • Tokens
+                state_parts = [raw_model]
                 if data["total_tokens"] > 0:
-                    state_parts.append(f"📊 {tokens_str} tokens")
-                
-                home_folder = os.path.basename(os.path.expanduser("~")).lower()
-                if data["project"] and data["project"].lower() != home_folder:
-                    proj_info = f"📁 {data['project']}"
-                    if data["branch"]:
-                        proj_info += f" ({data['branch']})"
-                    state_parts.append(proj_info)
+                    state_parts.append(f"{tokens_str} tokens")
 
-                state_str = "  │  ".join(state_parts)
+                state_str = " • ".join(state_parts)
+                # ponytail: clean layout without emojis or path lookup; upgrade path: re-add git context if daemon process exposes git root
 
                 state_key = f"{details_str}|{state_str}|{self.current_status}"
                 
