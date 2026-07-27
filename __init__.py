@@ -40,40 +40,6 @@ def _format_tokens(count: int) -> str:
     return str(count)
 
 
-def _pretty_model_name(raw_model: str) -> str:
-    """Transform raw model identifier string into a clean, human-readable brand name."""
-    if not raw_model:
-        return "Hermes Agent"
-    
-    clean = raw_model.split("/")[-1].lower()
-    
-    # Common model mappings
-    mappings = {
-        "gemini-3.6-flash-high": "Gemini 3.6 Flash",
-        "gemini-3.6-flash-medium": "Gemini 3.6 Flash",
-        "gemini-3.6-flash-low": "Gemini 3.6 Flash",
-        "gemini-3.5-flash-extra-low": "Gemini 3.5 Flash",
-        "gemini-3-flash-agent": "Gemini 3 Flash",
-        "claude-sonnet-4-6": "Claude 4.6 Sonnet",
-        "claude-sonnet-4": "Claude 4 Sonnet",
-        "claude-opus-4-6": "Claude 4.6 Opus",
-        "claude-opus-4": "Claude 4 Opus",
-        "nemotron-3-ultra": "Nemotron 3 Ultra",
-        "gpt-4o": "GPT-4o",
-        "gpt-4o-mini": "GPT-4o Mini",
-        "deepseek-r1": "DeepSeek R1",
-        "deepseek-v3": "DeepSeek V3",
-    }
-    
-    for key, pretty in mappings.items():
-        if key in clean:
-            return pretty
-            
-    # Fallback formatting: capitalize words
-    clean_name = clean.replace("-", " ").replace("_", " ").title()
-    return clean_name
-
-
 def _get_git_branch_fallback(folder_path: str) -> Optional[str]:
     """Fallback git branch lookup using git CLI if DB field is null."""
     if not folder_path or not os.path.exists(folder_path):
@@ -187,7 +153,7 @@ class DiscordRPCPlugin:
             try:
                 data = self.get_active_session_details()
                 title = data["title"]
-                pretty_model = _pretty_model_name(data["model"])
+                raw_model = data["model"]
                 tokens_str = _format_tokens(data["total_tokens"])
                 
                 # Line 1 (Details): Activity icon + Session title
@@ -200,8 +166,8 @@ class DiscordRPCPlugin:
                 else:
                     details_str = f"💬 Session: {title}"
 
-                # Line 2 (State): Model + Tokens + Project/Branch
-                state_parts = [f"🤖 {pretty_model}"]
+                # Line 2 (State): Model + Tokens + Project/Branch (raw model preserved)
+                state_parts = [f"🤖 {raw_model}"]
                 if data["total_tokens"] > 0:
                     state_parts.append(f"📊 {tokens_str} tokens")
                 
