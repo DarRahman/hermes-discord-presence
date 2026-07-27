@@ -1,0 +1,8 @@
+name: hermes-discord-rpc
+version: "1.0.0"
+description: "Discord Rich Presence (RPC) background daemon integration for Hermes Agent"
+author: "Badar Rahman"
+hooks:
+  - pre_llm_call
+  - post_tool_call
+  - on_session_end

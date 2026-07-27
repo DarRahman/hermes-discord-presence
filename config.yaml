@@ -1,0 +1,23 @@
+# Configuration for Hermes Agent Discord Rich Presence Integration
+
+# Discord Developer Portal Application Client ID
+discord_client_id: "1530932637546451074"
+
+# Refresh polling interval in seconds (recommended: 3.0)
+update_interval: 3.0
+
+# Rich Presence appearance and layout templates
+presence:
+  details_template: "Session: {title}"
+  state_template: "Model: {model}"
+  
+  # Asset key names matching Discord Developer Portal Art Assets
+  large_image: "hermes_logo"
+  large_text: "Hermes Agent"
+  
+  # External action buttons (maximum 2 allowed by Discord)
+  buttons:
+    - label: "Hermes Dashboard"
+      url: "http://localhost:20128"
+    - label: "GitHub Repo"
+      url: "https://github.com"
