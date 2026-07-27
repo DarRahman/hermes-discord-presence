@@ -1,6 +1,6 @@
 # Hermes Agent Discord Presence
 
-Show your active **Hermes Agent** session on Discord! Displays your current session topic, active AI model, and elapsed session time in real-time.
+Show your active **Hermes Agent** session on Discord! Displays your current session topic, active AI model, total tokens used, and live activity status in real-time.
 
 ---
 
@@ -20,7 +20,9 @@ Show your active **Hermes Agent** session on Discord! Displays your current sess
 
 - **Session Duration**: Real-time timer showing how long your Hermes session has been active.
 - **Session Title**: Displays the current workspace thread title from Hermes `state.db`.
-- **Model Tracking**: Shows the active LLM powering Hermes (e.g., `claude-opus-5`, `gpt-5.6-sol`, `gemini-3.6-flash-high`).
+- **Model Tracking**: Shows the exact active LLM powering Hermes (e.g. `ag/gemini-3.6-flash-high`, `claude-sonnet-4`).
+- **Token Counter**: Real-time total token usage counter (e.g. `51.5k tokens`, `5.1M tokens`).
+- **Live Activity Status**: Shows active state (`[Thinking]`, `[Running terminal]`) directly in line 1.
 - **Zero Background Daemons**: Runs natively inside the Hermes Agent process. Automatically connects on startup and disconnects cleanly when you exit Hermes.
 
 ---
@@ -70,8 +72,8 @@ Restart Hermes Agent to apply changes.
 
 The plugin operates natively within the Hermes process via three core mechanisms:
 
-1. **Lifecycle Hook Binding**: Registers with internal Hermes hooks (`pre_llm_call`, `post_tool_call`, `on_session_end`).
-2. **SQLite State Querying**: Executes fast, read-only queries against `state.db` to fetch the session title and active model associated with the latest message timestamp (`MAX(timestamp)`).
+1. **Lifecycle Hook Binding**: Registers with internal Hermes hooks (`pre_llm_call`, `pre_tool_call`, `post_tool_call`, `on_session_end`).
+2. **SQLite State Querying**: Executes fast, read-only queries against `state.db` to fetch the session title, model, and total tokens associated with the latest message timestamp (`MAX(timestamp)`).
 3. **Background Sync Thread**: Runs a non-blocking daemon thread polling Discord's local IPC pipe every 3 seconds to ensure status updates remain responsive.
 
 ### Active Session Tracking Behavior
@@ -84,8 +86,8 @@ Hermes Agent writes session data to `state.db` upon message interaction. Therefo
 ```
 +-------------------------------------------------------+
 | Hermes Agent                                          |
-| Session: Refactoring Auth Middleware                  |
-| Model: ag/gemini-3.6-flash-high                       |
+| [Thinking] Refactoring Auth Middleware                |
+| ag/gemini-3.6-flash-high • 5.1M tokens                |
 | 00:32:15 elapsed                                      |
 +-------------------------------------------------------+
 ```
@@ -137,7 +139,7 @@ Contributions are welcome! Feel free to open issues or submit pull requests to i
 
 ## License
 
-Distributed under the MIT License. See `LICENSE` for details.
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
