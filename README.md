@@ -49,7 +49,7 @@ Clone this repository into your local Hermes plugins folder:
 
 ```cmd
 mkdir "%LOCALAPPDATA%\hermes\plugins\hermes-discord-rpc"
-git clone https://github.com/your-username/hermes-discord-presence.git "%LOCALAPPDATA%\hermes\plugins\hermes-discord-rpc"
+git clone https://github.com/DarRahman/hermes-discord-presence.git "%LOCALAPPDATA%\hermes\plugins\hermes-discord-rpc"
 ```
 
 ### 3. Enable the Plugin
