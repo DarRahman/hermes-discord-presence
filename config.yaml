@@ -17,7 +17,5 @@ presence:
   
   # External action buttons (maximum 2 allowed by Discord)
   buttons:
-    - label: "Hermes Dashboard"
-      url: "http://localhost:20128"
     - label: "GitHub Repo"
-      url: "https://github.com"
+      url: "https://github.com/DarRahman/hermes-discord-presence"
