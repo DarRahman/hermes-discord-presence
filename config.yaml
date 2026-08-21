@@ -14,8 +14,3 @@ presence:
   # Asset key names matching Discord Developer Portal Art Assets
   large_image: "hermes_logo"
   large_text: "Hermes Agent"
-  
-  # External action buttons (maximum 2 allowed by Discord)
-  buttons:
-    - label: "GitHub Repo"
-      url: "https://github.com/DarRahman/hermes-discord-presence"
