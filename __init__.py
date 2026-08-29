@@ -11,9 +11,10 @@ License: MIT
 
 import os
 import sqlite3
+import sys
 import threading
 import time
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Dict, Any
 from pypresence import Presence
 
 CLIENT_ID = "1530932637546451074"
@@ -22,12 +23,43 @@ CLIENT_ID = "1530932637546451074"
 def _get_database_path() -> str:
     """Resolve platform-independent path for Hermes SQLite state database."""
     home = os.path.expanduser("~")
-    candidates = [
-        os.path.join(home, "AppData", "Local", "hermes", "state.db"),
-        os.path.join(home, ".hermes", "state.db"),
-        os.path.join(home, ".config", "hermes", "state.db"),
-    ]
+    if sys.platform == "win32":
+        candidates = [os.path.join(home, "AppData", "Local", "hermes", "state.db")]
+    else:
+        candidates = [
+            os.path.join(home, ".hermes", "state.db"),
+            os.path.join(home, ".config", "hermes", "state.db"),
+        ]
     return next((path for path in candidates if os.path.exists(path)), candidates[0])
+
+
+def _ensure_xdg_runtime_dir() -> None:
+    """Ensure XDG_RUNTIME_DIR is set for Discord IPC on Linux desktop/systemd."""
+    if sys.platform not in ("linux", "darwin") or os.environ.get("XDG_RUNTIME_DIR"):
+        return
+
+    runtime = f"/run/user/{os.getuid()}"
+    if os.path.isdir(runtime):
+        os.environ["XDG_RUNTIME_DIR"] = runtime
+        return
+
+    try:
+        import psutil
+
+        for proc in psutil.process_iter(["name"]):
+            name = (proc.info.get("name") or "").lower()
+            if "discord" not in name:
+                continue
+            try:
+                env = proc.environ()
+            except (psutil.AccessDenied, psutil.NoSuchProcess):
+                continue
+            runtime = env.get("XDG_RUNTIME_DIR")
+            if runtime and os.path.isdir(runtime):
+                os.environ["XDG_RUNTIME_DIR"] = runtime
+                return
+    except Exception:
+        pass
 
 
 def _format_tokens(count: int) -> str:
@@ -54,15 +86,18 @@ class DiscordRPCPlugin:
         """Connect to local Discord IPC socket."""
         if self.is_connected:
             return True
-        try:
-            self.rpc = Presence(CLIENT_ID)
-            self.rpc.connect()
-            self.is_connected = True
-            self.start_time = time.time()
-            return True
-        except Exception:
-            self.is_connected = False
-            return False
+        _ensure_xdg_runtime_dir()
+        for pipe in (None, *range(10)):
+            try:
+                self.rpc = Presence(CLIENT_ID, pipe=pipe)
+                self.rpc.connect()
+                self.is_connected = True
+                self.start_time = time.time()
+                return True
+            except Exception:
+                self.rpc = None
+        self.is_connected = False
+        return False
 
     def disconnect(self):
         """Disconnect cleanly from Discord RPC."""
@@ -177,12 +212,18 @@ def _on_session_end(*args, **kwargs):
     _plugin_instance.set_status("Active")
 
 
+def _on_session_finalize(*args, **kwargs):
+    """Hook: Hermes session teardown — disconnect Discord RPC cleanly."""
+    _plugin_instance.disconnect()
+
+
 def register(ctx):
     """Plugin initialization entry point called by Hermes plugin loader on launch."""
     ctx.register_hook("pre_llm_call", _on_pre_llm)
     ctx.register_hook("pre_tool_call", _on_pre_tool)
     ctx.register_hook("post_tool_call", _on_post_tool)
     ctx.register_hook("on_session_end", _on_session_end)
+    ctx.register_hook("on_session_finalize", _on_session_finalize)
     
     # Trigger initial update on application startup
     threading.Thread(target=_plugin_instance.update_presence, daemon=True).start()
