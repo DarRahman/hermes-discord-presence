@@ -53,6 +53,16 @@ The plugin automatically locates Hermes database storage cross-platform:
 
 ---
 
+## Privacy & Data Transparency
+
+This plugin broadcasts high-level activity to your personal Discord profile via local IPC:
+- **Active Model**: e.g., `gemini-3.7-flash` or `claude-3-5-sonnet`.
+- **Live State**: e.g., `Active`, `Thinking...`, `Running tool: bash`.
+- **Token Counts & Duration**: Formatted token counts and session elapsed time.
+- **Local Only**: All data is read locally from `state.db` on your machine and sent directly to your local Discord desktop client. No external servers or third-party telemetry are involved.
+
+---
+
 ## Installation
 
 ### 1. Install Dependencies
