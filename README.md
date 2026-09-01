@@ -56,10 +56,11 @@ The plugin automatically locates Hermes database storage cross-platform:
 ## Privacy & Data Transparency
 
 This plugin broadcasts high-level activity to your personal Discord profile via local IPC:
-- **Active Model**: e.g., `gemini-3.7-flash` or `claude-3-5-sonnet`.
+- **Active Model**: e.g., `claude-fable-5`.
 - **Live State**: e.g., `Active`, `Thinking...`, `Running tool: bash`.
 - **Token Counts & Duration**: Formatted token counts and session elapsed time.
 - **Local Only**: All data is read locally from `state.db` on your machine and sent directly to your local Discord desktop client. No external servers or third-party telemetry are involved.
+- **Opt-Out / Disable**: To disable status broadcasting at any time, run `hermes plugins disable hermes-discord-rpc` or remove it from `plugins.enabled` in `config.yaml`.
 
 ---
 
@@ -138,9 +139,10 @@ Contributions are welcome. Please submit issues or pull requests:
 
 ---
 
-## Author
+## Authors & Contributors
 
 - **Badar Rahman** ([@DarRahman](https://github.com/DarRahman))
+- **Hari** ([@Mr-Neutr0n](https://github.com/Mr-Neutr0n))
 
 ---
 
