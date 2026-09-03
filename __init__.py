@@ -127,7 +127,7 @@ class DiscordRPCPlugin:
                     "       COALESCE(s.input_tokens, 0) + COALESCE(s.output_tokens, 0) AS total_tokens "
                     "FROM messages m "
                     "JOIN sessions s ON m.session_id = s.id "
-                    "WHERE s.id NOT LIKE 'cron%' "
+                    "WHERE s.id NOT LIKE 'cron%' AND s.title IS NOT NULL AND s.model IS NOT NULL "
                     "GROUP BY m.session_id "
                     "ORDER BY MAX(m.timestamp) DESC LIMIT 1"
                 ).fetchone()
