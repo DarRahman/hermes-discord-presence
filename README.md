@@ -1,7 +1,7 @@
 # Hermes Agent Discord Presence
 
 [![CI](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml/badge.svg)](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml)
-[![Plugin Manifest](https://img.shields.io/badge/hermes--plugin-v1.1.1-orange)](plugin.yaml)
+[![Plugin Manifest](https://img.shields.io/badge/hermes--plugin-v1.1.2-orange)](plugin.yaml)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 

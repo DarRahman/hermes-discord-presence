@@ -15,7 +15,6 @@ import sys
 import threading
 import time
 from typing import Optional, Dict, Any
-from pypresence import Presence
 
 CLIENT_ID = "1530932637546451074"
 
@@ -75,7 +74,7 @@ class DiscordRPCPlugin:
     """Singleton plugin class managing Discord RPC connection and state updates."""
 
     def __init__(self):
-        self.rpc: Optional[Presence] = None
+        self.rpc: Optional[Any] = None
         self.is_connected = False
         self.start_time = time.time()
         self.current_status = "Active"
@@ -86,6 +85,11 @@ class DiscordRPCPlugin:
         """Connect to local Discord IPC socket."""
         if self.is_connected:
             return True
+        try:
+            from pypresence import Presence
+        except ImportError:
+            self.is_connected = False
+            return False
         _ensure_xdg_runtime_dir()
         for pipe in (None, *range(10)):
             try:
