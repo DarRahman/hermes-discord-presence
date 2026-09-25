@@ -14,21 +14,56 @@ import sqlite3
 import sys
 import threading
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 CLIENT_ID = "1530932637546451074"
 
 
-def _get_database_path() -> str:
-    """Resolve platform-independent path for Hermes SQLite state database."""
-    home = os.path.expanduser("~")
+def _expand_path(path: str) -> str:
+    """Expand ``~`` and environment-variable syntax in a path string."""
+    return os.path.expanduser(os.path.expandvars(path))
+
+
+def _default_hermes_home() -> str:
+    """Platform default Hermes home, mirroring Hermes' own resolution."""
+    suffix = os.environ.get("HERMES_DATA_DIR_SUFFIX", "")
     if sys.platform == "win32":
-        candidates = [os.path.join(home, "AppData", "Local", "hermes", "state.db")]
-    else:
-        candidates = [
-            os.path.join(home, ".hermes", "state.db"),
-            os.path.join(home, ".config", "hermes", "state.db"),
-        ]
+        local_appdata = os.environ.get("LOCALAPPDATA", "").strip()
+        base = local_appdata or os.path.join(os.path.expanduser("~"), "AppData", "Local")
+        return os.path.join(base, "hermes" + suffix)
+    return os.path.join(os.path.expanduser("~"), ".hermes" + suffix)
+
+
+def _candidate_database_paths() -> List[str]:
+    """Ordered candidate paths for the Hermes SQLite state database.
+
+    ``HERMES_HOME`` is authoritative: Hermes exports it for the profile a
+    process serves, and ``state.db`` lives directly inside that home
+    (``~/.hermes/state.db`` for the default profile,
+    ``~/.hermes/profiles/<name>/state.db`` for a named one). Because the active
+    profile must win, setting it yields exactly one candidate — falling back to
+    another profile's database is the bug this resolution avoids.
+
+    Without ``HERMES_HOME`` we fall back to the platform default home and then
+    to the legacy ``~/.config/hermes`` location.
+    """
+    hermes_home = os.environ.get("HERMES_HOME", "").strip()
+    if hermes_home:
+        return [os.path.join(_expand_path(hermes_home), "state.db")]
+
+    return [
+        os.path.join(_default_hermes_home(), "state.db"),
+        os.path.join(os.path.expanduser("~"), ".config", "hermes", "state.db"),
+    ]
+
+
+def _get_database_path() -> str:
+    """Resolve the state database of the active profile.
+
+    Prefers the first candidate that exists on disk; when none do, returns the
+    highest-priority candidate so callers still report the correct target.
+    """
+    candidates = _candidate_database_paths()
     return next((path for path in candidates if os.path.exists(path)), candidates[0])
 
 
@@ -113,9 +148,13 @@ class DiscordRPCPlugin:
         self.is_connected = False
         self.last_state_key = None
 
-    def get_active_session_details(self) -> Dict[str, Any]:
-        """Query active session metadata (title, model, tokens) from SQLite."""
-        db_path = _get_database_path()
+    def get_active_session_details(self, db_path: Optional[str] = None) -> Dict[str, Any]:
+        """Query active session metadata (title, model, tokens) from SQLite.
+
+        ``db_path`` defaults to the active profile's database; tests inject an
+        explicit path.
+        """
+        db_path = db_path or _get_database_path()
         details = {
             "title": "Active Workspace",
             "model": "Hermes Agent",
