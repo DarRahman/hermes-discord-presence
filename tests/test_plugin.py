@@ -338,3 +338,39 @@ def test_connect_degrades_gracefully_without_pypresence(plugin, monkeypatch):
 
     assert instance.connect() is False
     assert instance.is_connected is False
+
+
+# --------------------------------------------------------------------------
+# v1.2.0 feature tests
+# --------------------------------------------------------------------------
+
+
+def test_format_tool_activity(plugin):
+    assert plugin._format_tool_activity("terminal") == "Running Terminal Command"
+    assert plugin._format_tool_activity("execute_code") == "Running Python Kernel"
+    assert plugin._format_tool_activity("mcp__github__create_issue") == "Running MCP Tool (github)"
+    assert plugin._format_tool_activity("custom_action") == "Running Custom Action"
+    assert plugin._format_tool_activity("") == "Executing Tool"
+
+
+def test_safe_truncate(plugin):
+    assert plugin._safe_truncate(None) is None
+    assert plugin._safe_truncate("short text", 20) == "short text"
+    assert plugin._safe_truncate("hello world", 8) == "hello..."
+    assert len(plugin._safe_truncate("A" * 150, 120)) == 120
+
+
+def test_hold_timer_preserves_status(plugin):
+    """Hold timer prevents rapid lifecycle events from clearing active tool state."""
+    instance = plugin.DiscordRPCPlugin()
+    instance.set_status("Running Terminal Command", hold=True)
+    assert instance.current_status == "Running Terminal Command"
+
+    instance.set_status("Processing", hold=False)
+    assert instance.current_status == "Running Terminal Command"
+
+    instance.set_status("Active", hold=False)
+    assert instance.current_status == "Running Terminal Command"
+
+    instance.set_status("Running Python Kernel", hold=True)
+    assert instance.current_status == "Running Python Kernel"

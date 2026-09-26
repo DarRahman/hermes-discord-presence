@@ -1,11 +1,14 @@
 # Hermes Agent Discord Presence
 
 [![CI](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml/badge.svg)](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml)
-[![Plugin Manifest](https://img.shields.io/badge/hermes--plugin-v1.1.2-orange)](plugin.yaml)
+[![Official Hermes Catalog](https://img.shields.io/badge/hermes--catalog-official-blueviolet)](https://github.com/NousResearch/hermes-agent/tree/main/plugin-catalog/hermes-discord-rpc.yaml)
+[![Plugin Version](https://img.shields.io/badge/version-v1.2.0-orange)](plugin.yaml)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-Native Discord Rich Presence (RPC) integration for Hermes Agent. Displays active workspace session titles, LLM model names, live token consumption, elapsed time, and real-time execution states directly on your Discord profile.
+Native Discord Rich Presence (RPC) integration for Hermes Agent. Displays active workspace session titles, LLM model names, live token consumption, reasoning tokens, elapsed time, and real-time execution states directly on your Discord profile.
+
+Officially listed in the [Hermes Agent Curated Plugin Catalog](https://github.com/NousResearch/hermes-agent/tree/main/plugin-catalog/hermes-discord-rpc.yaml).
 
 <p align="center">
   <img src="assets/preview.png" alt="Hermes Discord Presence Preview" width="480">
@@ -15,77 +18,38 @@ Native Discord Rich Presence (RPC) integration for Hermes Agent. Displays active
 
 ## Features
 
-- **In-Process Native Execution**: Runs directly inside the Hermes Agent process using lifecycle hooks. No external background daemons or separate system services.
-- **Zero Setup**: Uses a pre-configured Discord Application ID (`1530932637546451074`) with default brand assets. Works out of the box.
-- **Live Status & Activity**: Real-time activity tags (`[Thinking]`, `[Running <tool>]`, `[Processing]`).
-- **Session & Token Tracking**: Reads session titles, active LLM model names, and total token usage from local Hermes SQLite state storage (`state.db`).
-- **Clean Session Lifecycle**: Connects on launch and disconnects cleanly when Hermes shuts down.
-
----
-
-## Architecture & Flow
-
-```
-Hermes Agent Process
-  │
-  ├──► Lifecycle Hooks (pre_llm_call, pre_tool_call, post_tool_call, on_session_end)
-  │      └──► Updates in-memory status state
-  │
-  ├──► SQLite Reader (file:state.db?mode=ro)
-  │      └──► Queries latest session title, active model, and token count
-  │
-  └──► Background Sync Thread (pypresence IPC)
-         └──► Updates Discord Desktop Client (Unix Domain Socket / Windows Named Pipe)
-```
-
-### Path Resolution
-
-The plugin reads the database of the **active profile**:
-
-1. `$HERMES_HOME/state.db` — Hermes sets this for the profile the process serves: `~/.hermes` for the default profile, `~/.hermes/profiles/<name>` for a named one. `~` and `$VAR` syntax inside the value are expanded. When it is set, it is authoritative — the plugin never falls back to another profile's database.
-2. Otherwise, the platform default home: `%LOCALAPPDATA%\hermes` on Windows, `~/.hermes` elsewhere, honouring `HERMES_DATA_DIR_SUFFIX` when set.
-3. Otherwise, the legacy fallback `~/.config/hermes/state.db`.
-
----
-
-## Requirements
-
-- Discord Desktop client running locally.
-- Hermes Agent installed (CLI or Desktop GUI).
-- Python 3.10+ with `pypresence` and `psutil`.
-
----
-
-## Privacy & Data Transparency
-
-This plugin broadcasts high-level activity to your personal Discord profile via local IPC:
-- **Active Model**: e.g., `claude-fable-5`.
-- **Live State**: e.g., `Active`, `Thinking...`, `Running tool: bash`.
-- **Token Counts & Duration**: Formatted token counts and session elapsed time.
-- **Local Only**: All data is read locally from `state.db` on your machine and sent directly to your local Discord desktop client. No external servers or third-party telemetry are involved.
-- **Opt-Out / Disable**: To disable status broadcasting at any time, run `hermes plugins disable hermes-discord-rpc` or remove it from `plugins.enabled` in `config.yaml`.
+- **Official Catalog Plugin**: Listed in the upstream Nous Research Hermes Agent plugin catalog.
+- **In-Process Native Execution**: Runs directly inside the Hermes Agent process using lifecycle hooks with zero background daemon overhead.
+- **Zero Setup**: Uses a pre-configured Discord Application ID (`1530932637546451074`) with default brand assets. Works immediately out of the box.
+- **Profile-Aware**: Automatically resolves the active profile's database (`$HERMES_HOME/state.db`) rather than defaulting to the main profile.
+- **Hold-Timer & Activity Debouncing**: Activity status indicators (e.g. `[Running Terminal Command]`, `[Running Python Kernel]`, `[Searching Files]`) are held for a minimum of 5 seconds to comply with Discord IPC rate limits and ensure readability.
+- **Reasoning Tokens Support**: Tracks total token usage including modern reasoning tokens from thinking models (Gemini 3.8 Thinking, Claude 3.7, o3).
+- **Comprehensive Privacy Controls**: Configurable toggles to mask session titles, hide model names, omit token counters, or run in stealth mode.
+- **Safe Truncation**: Automatically trims long strings to 120 characters with ellipsis to prevent Discord 128-character IPC crashes.
 
 ---
 
 ## Installation
 
-### 1. Install Dependencies
+### Method 1: Official Plugin Catalog (Recommended)
 
-Install required Python packages:
+Since the plugin is indexed in the official Hermes Agent catalog, install it directly by name:
 
 ```bash
-pip install pypresence pyyaml
+hermes plugins install hermes-discord-rpc
 ```
 
-### 2. Install Plugin via Hermes CLI
+### Method 2: From GitHub Repository
 
-Install directly from the GitHub repository:
+Alternatively, install directly from the source repository:
 
 ```bash
 hermes plugins install DarRahman/hermes-discord-presence
 ```
 
-### 3. Enable Plugin
+---
+
+## Enabling the Plugin
 
 Enable the plugin via Hermes CLI:
 
@@ -93,7 +57,7 @@ Enable the plugin via Hermes CLI:
 hermes plugins enable hermes-discord-rpc
 ```
 
-Or add `hermes-discord-rpc` to `plugins.enabled` in `%LOCALAPPDATA%\hermes\config.yaml` (`~/.hermes/config.yaml` on Linux/macOS):
+Or ensure `hermes-discord-rpc` is listed under `plugins.enabled` in your Hermes `config.yaml` (`%LOCALAPPDATA%\hermes\config.yaml` on Windows, `~/.hermes/config.yaml` on Linux/macOS):
 
 ```yaml
 plugins:
@@ -105,47 +69,88 @@ Restart Hermes Agent to apply changes.
 
 ---
 
-## Custom Discord Application (Optional)
+## Configuration & Privacy Controls
 
-To use your own Discord Application ID and art assets, configure `config.yaml`:
+Configuration is managed via `config.yaml` located in your plugin directory (`~/.hermes/plugins/hermes-discord-rpc/config.yaml` or `%LOCALAPPDATA%\hermes\plugins\hermes-discord-rpc\config.yaml`):
 
 ```yaml
-discord_client_id: "YOUR_DISCORD_CLIENT_ID"
+discord_client_id: "1530932637546451074"
 update_interval: 3.0
+hold_duration: 5.0
+
 presence:
-  large_image: "your_asset_key"
+  large_image: "hermes_logo"
   large_text: "Hermes Agent"
+
+privacy:
+  # Title display mode:
+  # - "full"    : Show original session title ("Session: <title>") [Default]
+  # - "generic" : Show generic text ("Active Session")
+  # - "hidden"  : Omit title line completely (minimal 1-line layout)
+  session_title_mode: "full"
+
+  # Privacy toggles:
+  hide_model: false           # Mask active model name
+  hide_tokens: false          # Omit token counters
+  hide_tool_status: false     # Suppress [Running ...] tool tags
+  stealth_mode: false         # Minimal stealth presence (app name and elapsed time only)
 ```
 
 ---
 
-## Development & Verification
+## Architecture & Database Resolution
 
-Install dependencies and run the test suite:
+```
+Hermes Agent Process
+  │
+  ├──► Lifecycle Hooks (pre_llm_call, pre_tool_call, post_tool_call, on_session_end)
+  │      └──► Updates in-memory status with hold timer (5s minimum display)
+  │
+  ├──► SQLite Reader (file:state.db?mode=ro)
+  │      └──► Reads active profile ($HERMES_HOME) session metadata, tokens, and reasoning tokens
+  │
+  └──► Background Sync Thread (pypresence IPC)
+         └──► Throttled updates to local Discord client socket
+```
+
+### Profile Precedence
+1. `$HERMES_HOME/state.db` (Authoritative for active profile).
+2. Platform default home: `%LOCALAPPDATA%\hermes\state.db` on Windows, `~/.hermes/state.db` on POSIX.
+3. Legacy fallback: `~/.config/hermes/state.db`.
+
+---
+
+## Development & Testing
+
+Install development dependencies:
 
 ```bash
 pip install -r requirements.txt -r requirements-dev.txt
+```
+
+Run test suite:
+
+```bash
 python -m pytest
 ```
 
-Run contract validation using Hermes plugin doctor:
+Validate Hermes plugin contract:
 
 ```bash
-hermes plugins doctor .
+hermes plugins validate . --json
 ```
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please submit issues or pull requests:
+Contributions are welcome. Please open an issue or submit a pull request:
 
 1. Fork the repository.
-2. Create your feature branch (`git checkout -b feature/amazing-feature`).
-3. Validate plugin integrity (`hermes plugins doctor .`).
-4. Commit your changes (`git commit -m 'feat: add amazing feature'`).
-5. Push to the branch (`git push origin feature/amazing-feature`).
-6. Open a Pull Request.
+2. Create your feature branch (`git checkout -b feature/my-feature`).
+3. Run test suite and validation (`pytest && hermes plugins validate .`).
+4. Commit your changes (`git commit -m 'feat: description'`).
+5. Push to your branch and submit a PR.
 
 ---
 
@@ -153,6 +158,7 @@ Contributions are welcome. Please submit issues or pull requests:
 
 - **Badar Rahman** ([@DarRahman](https://github.com/DarRahman))
 - **Hari** ([@Mr-Neutr0n](https://github.com/Mr-Neutr0n))
+- **vergiLgood1** ([@vergiLgood1](https://github.com/vergiLgood1))
 
 ---
 
