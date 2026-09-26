@@ -39,9 +39,12 @@ Hermes Agent Process
 ```
 
 ### Path Resolution
-The plugin automatically locates Hermes database storage cross-platform:
-- Windows: `%LOCALAPPDATA%\hermes\state.db`
-- Linux/macOS: `~/.hermes/state.db` or `~/.config/hermes/state.db`
+
+The plugin reads the database of the **active profile**:
+
+1. `$HERMES_HOME/state.db` — Hermes sets this for the profile the process serves: `~/.hermes` for the default profile, `~/.hermes/profiles/<name>` for a named one. `~` and `$VAR` syntax inside the value are expanded. When it is set, it is authoritative — the plugin never falls back to another profile's database.
+2. Otherwise, the platform default home: `%LOCALAPPDATA%\hermes` on Windows, `~/.hermes` elsewhere, honouring `HERMES_DATA_DIR_SUFFIX` when set.
+3. Otherwise, the legacy fallback `~/.config/hermes/state.db`.
 
 ---
 
@@ -49,7 +52,7 @@ The plugin automatically locates Hermes database storage cross-platform:
 
 - Discord Desktop client running locally.
 - Hermes Agent installed (CLI or Desktop GUI).
-- Python 3.10+ with `pypresence` and `pyyaml`.
+- Python 3.10+ with `pypresence` and `psutil`.
 
 ---
 
@@ -117,6 +120,13 @@ presence:
 ---
 
 ## Development & Verification
+
+Install dependencies and run the test suite:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest
+```
 
 Run contract validation using Hermes plugin doctor:
 
