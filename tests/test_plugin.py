@@ -64,6 +64,8 @@ def _create_state_db(path, sessions, messages):
 def isolated_home(tmp_path, monkeypatch):
     """A fake ``$HOME`` with the profile-related env vars cleared."""
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "AppData" / "Local"))
     monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.delenv("HERMES_DATA_DIR_SUFFIX", raising=False)
     return tmp_path
@@ -159,18 +161,30 @@ def test_database_path_expands_user_in_hermes_home(plugin, isolated_home, set_he
 
     set_hermes_home("~/custom-home")
 
-    assert plugin._get_database_path() == str(isolated_home / "custom-home" / "state.db")
+    assert os.path.normpath(plugin._get_database_path()) == os.path.normpath(
+        str(isolated_home / "custom-home" / "state.db")
+    )
 
 
 def test_database_path_defaults_without_hermes_home(plugin, isolated_home):
-    assert plugin._get_database_path() == str(isolated_home / ".hermes" / "state.db")
+    expected = (
+        isolated_home / "AppData" / "Local" / "hermes" / "state.db"
+        if sys.platform == "win32"
+        else isolated_home / ".hermes" / "state.db"
+    )
+    assert plugin._get_database_path() == str(expected)
 
 
 def test_database_path_honours_data_dir_suffix(plugin, isolated_home, monkeypatch):
     """``HERMES_DATA_DIR_SUFFIX`` shifts the platform default home."""
     monkeypatch.setenv("HERMES_DATA_DIR_SUFFIX", "-dev")
 
-    assert plugin._get_database_path() == str(isolated_home / ".hermes-dev" / "state.db")
+    expected = (
+        isolated_home / "AppData" / "Local" / "hermes-dev" / "state.db"
+        if sys.platform == "win32"
+        else isolated_home / ".hermes-dev" / "state.db"
+    )
+    assert plugin._get_database_path() == str(expected)
 
 
 def test_database_path_falls_back_to_legacy_config_location(plugin, isolated_home):
