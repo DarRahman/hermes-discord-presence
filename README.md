@@ -1,14 +1,14 @@
 # Hermes Agent Discord Presence
 
 [![CI](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml/badge.svg)](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml)
-[![Official Hermes Catalog](https://img.shields.io/badge/hermes--catalog-official-blueviolet)](https://github.com/NousResearch/hermes-agent/tree/main/plugin-catalog/hermes-discord-rpc.yaml)
+[![Official Hermes Catalog](https://img.shields.io/badge/hermes--catalog-official-blueviolet)](https://hermes-agent.nousresearch.com/docs/plugins/hermes-discord-rpc)
 [![Plugin Version](https://img.shields.io/badge/version-v1.2.0-orange)](plugin.yaml)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 Native Discord Rich Presence (RPC) integration for Hermes Agent. Displays active workspace session titles, LLM model names, live token consumption, reasoning tokens, elapsed time, and real-time execution states directly on your Discord profile.
 
-Officially listed in the [Hermes Agent Curated Plugin Catalog](https://github.com/NousResearch/hermes-agent/tree/main/plugin-catalog/hermes-discord-rpc.yaml).
+Officially listed in the [Hermes Agent Curated Plugin Catalog](https://hermes-agent.nousresearch.com/docs/plugins/hermes-discord-rpc).
 
 <p align="center">
   <img src="assets/preview.png" alt="Hermes Discord Presence Preview" width="480">
@@ -18,7 +18,7 @@ Officially listed in the [Hermes Agent Curated Plugin Catalog](https://github.co
 
 ## Features
 
-- **Official Catalog Plugin**: Listed in the upstream Nous Research Hermes Agent plugin catalog.
+- **Official Catalog Plugin**: Listed in the official [Nous Research Hermes Agent Plugin Catalog](https://hermes-agent.nousresearch.com/docs/plugins/hermes-discord-rpc).
 - **In-Process Native Execution**: Runs directly inside the Hermes Agent process using lifecycle hooks with zero background daemon overhead.
 - **Zero Setup**: Uses a pre-configured Discord Application ID (`1530932637546451074`) with default brand assets. Works immediately out of the box.
 - **Profile-Aware**: Automatically resolves the active profile's database (`$HERMES_HOME/state.db`) rather than defaulting to the main profile.
@@ -103,7 +103,7 @@ privacy:
 ```
 Hermes Agent Process
   │
-  ├──► Lifecycle Hooks (pre_llm_call, pre_tool_call, post_tool_call, on_session_end)
+  ├──► Lifecycle Hooks (pre_llm_call, pre_tool_call, post_tool_call, on_session_end, on_session_finalize)
   │      └──► Updates in-memory status with hold timer (5s minimum display)
   │
   ├──► SQLite Reader (file:state.db?mode=ro)
