@@ -1,10 +1,9 @@
 name: hermes-discord-rpc
-version: "1.2.0"
+version: "1.2.1"
 description: "Native Discord Rich Presence (RPC) integration for Hermes Agent"
 author: "Badar Rahman"
 python_dependencies:
   - "pypresence>=4.3.0,<5"
-  - "psutil>=5.9.0,<8"
 provides_hooks:
   - pre_llm_call
   - pre_tool_call
