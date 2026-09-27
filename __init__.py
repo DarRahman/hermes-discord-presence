@@ -287,7 +287,7 @@ class DiscordRPCPlugin:
                 hide_model = bool(privacy.get("hide_model", False))
                 hide_tokens = bool(privacy.get("hide_tokens", False))
                 hide_tool = bool(privacy.get("hide_tool_status", False))
-                title_mode = str(privacy.get("session_title_mode", "full"))
+                title_mode = str(privacy.get("session_title_mode", "generic"))
 
                 if stealth:
                     details_str = None

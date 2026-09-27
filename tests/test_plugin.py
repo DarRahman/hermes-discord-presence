@@ -472,3 +472,27 @@ def test_default_config_still_shows_the_activity_label(plugin, monkeypatch):
     assert payload["details"] == "[Running Terminal Command] Secret Project"
     assert payload["large_text"] == "Hermes Agent — Running Terminal Command"
     assert payload["state"] == "model-x • 4.2k tokens"
+
+
+def test_unconfigured_session_title_mode_defaults_to_generic(plugin, monkeypatch):
+    """When privacy config omits session_title_mode, it falls back to generic ('Active Session')."""
+    config = {
+        "presence": {"large_image": "hermes_logo", "large_text": "Hermes Agent"},
+        "privacy": {},
+    }
+    monkeypatch.setattr(plugin, "_load_config", lambda: config)
+    monkeypatch.setattr(
+        plugin.DiscordRPCPlugin,
+        "get_active_session_details",
+        lambda self: {"title": "Confidential Restructure", "model": "model-x", "total_tokens": 4242},
+    )
+
+    instance = plugin.DiscordRPCPlugin()
+    instance.rpc = _CapturingRPC()
+    instance.is_connected = True
+    instance.set_status("Active", hold=True)
+    payload = instance.rpc.updates[-1]
+
+    assert payload["details"] == "Active Session"
+    assert "Confidential Restructure" not in (payload["details"] or "")
+

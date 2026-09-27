@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml/badge.svg)](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml)
 [![Official Hermes Catalog](https://img.shields.io/badge/hermes--catalog-official-blueviolet)](https://hermes-agent.nousresearch.com/docs/plugins/hermes-discord-rpc)
-[![Plugin Version](https://img.shields.io/badge/version-v1.2.2-orange)](plugin.yaml)
+[![Plugin Version](https://img.shields.io/badge/version-v1.2.3-orange)](plugin.yaml)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -84,10 +84,10 @@ presence:
 
 privacy:
   # Title display mode:
-  # - "full"    : Show original session title ("Session: <title>") [Default]
-  # - "generic" : Show generic text ("Active Session")
+  # - "generic" : Show generic text ("Active Session") [Default]
+  # - "full"    : Show original session title ("Session: <title>")
   # - "hidden"  : Omit title line completely (minimal 1-line layout)
-  session_title_mode: "full"
+  session_title_mode: "generic"
 
   # Privacy toggles:
   hide_model: false           # Mask active model name

@@ -7,7 +7,7 @@ presence:
   large_text: "Hermes Agent"
 
 privacy:
-  session_title_mode: "full"
+  session_title_mode: "generic"
   hide_model: false
   hide_tokens: false
   hide_tool_status: false
