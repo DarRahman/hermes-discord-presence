@@ -159,6 +159,7 @@ Contributions are welcome. Please open an issue or submit a pull request:
 - **Badar Rahman** ([@DarRahman](https://github.com/DarRahman))
 - **Hari** ([@Mr-Neutr0n](https://github.com/Mr-Neutr0n))
 - **vergiLgood1** ([@vergiLgood1](https://github.com/vergiLgood1))
+- **Marc Ocampo** ([@marcxxv](https://github.com/marcxxv))
 
 ---
 
