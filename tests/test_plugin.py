@@ -618,3 +618,32 @@ def test_ownership_claim_is_scoped_per_user(plugin, monkeypatch, tmp_path):
     assert os.path.dirname(path) == str(tmp_path)
     assert f".{os.getuid()}." in os.path.basename(path)
     assert plugin._read_owner() == {"token": "abc123", "stamp": 1.0}
+
+
+def test_only_the_busy_terminal_publishes_within_one_profile(plugin, monkeypatch, tmp_path):
+    """Same profile, one terminal running a tool: the idle one must not take the slot.
+
+    Two terminals in one profile read the same session, so title/model/tokens agree and
+    the *only* difference between their payloads is ``current_status`` -- which appears
+    in both ``state_key`` and ``large_text``. A terminal running a tool therefore renders
+    "[Running Terminal Command]" while an idle sibling renders "Active Session", and both
+    decide they must publish. Measured on unfixed main, the idle sibling's write lands
+    last and Discord displays the idle status while the user is actively working.
+    """
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    # Same label => same session => same profile. Status is the only difference.
+    busy = _connected_instance(plugin, monkeypatch, "shared", runtime)
+    idle = _connected_instance(plugin, monkeypatch, "shared", runtime)
+
+    monkeypatch.setattr(plugin, "_plugin_instance", busy)
+    plugin._on_pre_tool(tool_name="terminal")
+    assert busy.current_status == "Running Terminal Command"
+    assert idle.current_status == "Active"
+
+    for _ in range(10):
+        busy.update_presence()
+        idle.update_presence()
+
+    assert len(busy.rpc.updates) == 1
+    assert idle.rpc.updates == [], "idle sibling published over the terminal in use"
