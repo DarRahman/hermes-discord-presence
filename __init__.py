@@ -25,6 +25,11 @@ TOOL_DISPLAY_MAP = {
     "cronjob_manage": "Scheduling Task",
 }
 
+# Statuses set by the lifecycle hooks themselves, as opposed to labels derived
+# from a tool name by ``_format_tool_activity``. Used to tell whether a status
+# discloses what the agent is doing.
+LIFECYCLE_STATUSES = ("Active", "Idle", "Thinking", "Processing")
+
 
 def _safe_truncate(text: Optional[str], max_len: int = 120) -> Optional[str]:
     """Truncate text cleanly with ellipsis if length exceeds max_len."""
@@ -311,7 +316,17 @@ class DiscordRPCPlugin:
                 details_str = _safe_truncate(details_str, 120)
                 state_str = _safe_truncate(state_str, 120)
 
-                large_text = f"{self.large_text_template} — {self.current_status}"
+                # A status naming the tool is privacy-relevant in every field it
+                # reaches, so the large-text line honours the same toggles as the
+                # details line above: stealth_mode withholds any status, and
+                # hide_tool_status drops one that names the tool. A neutral
+                # lifecycle word such as "Thinking" is not a tool name and stays.
+                status_names_tool = self.current_status not in LIFECYCLE_STATUSES
+                show_status = not stealth and not (hide_tool and status_names_tool)
+                if show_status:
+                    large_text = f"{self.large_text_template} — {self.current_status}"
+                else:
+                    large_text = self.large_text_template
                 large_text = _safe_truncate(large_text, 120)
 
                 state_key = f"{details_str}|{state_str}|{large_text}|{self.current_status}"

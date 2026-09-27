@@ -374,3 +374,101 @@ def test_hold_timer_preserves_status(plugin):
 
     instance.set_status("Running Python Kernel", hold=True)
     assert instance.current_status == "Running Python Kernel"
+
+
+# --------------------------------------------------------------------------
+# privacy: the activity label must not leak through the large-text line
+# --------------------------------------------------------------------------
+
+
+class _CapturingRPC:
+    """Stand-in for the pypresence client that records published payloads."""
+
+    def __init__(self):
+        self.updates = []
+
+    def update(self, **kwargs):
+        self.updates.append(kwargs)
+
+    def close(self):
+        pass
+
+
+def _publish_status(plugin, monkeypatch, status, **privacy):
+    """Publish ``status`` and return the payload Discord would have received.
+
+    The plugin is put in a connected state with a captured client, so the test
+    exercises the real payload assembly in :meth:`DiscordRPCPlugin.update_presence`
+    without needing a live Discord process.
+    """
+    config = {
+        "presence": {"large_image": "hermes_logo", "large_text": "Hermes Agent"},
+        "privacy": {
+            "session_title_mode": "full",
+            "hide_model": False,
+            "hide_tokens": False,
+            "hide_tool_status": False,
+            "stealth_mode": False,
+        },
+    }
+    config["privacy"].update(privacy)
+
+    monkeypatch.setattr(plugin, "_load_config", lambda: config)
+    monkeypatch.setattr(
+        plugin.DiscordRPCPlugin,
+        "get_active_session_details",
+        lambda self: {"title": "Secret Project", "model": "model-x", "total_tokens": 4242},
+    )
+
+    instance = plugin.DiscordRPCPlugin()
+    instance.rpc = _CapturingRPC()
+    instance.is_connected = True
+    instance.set_status(status, hold=True)
+    return instance.rpc.updates[-1]
+
+
+@pytest.mark.parametrize("status", ["Thinking", "Running Terminal Command", "Processing", "Active"])
+def test_stealth_mode_withholds_the_activity_label(plugin, monkeypatch, status):
+    """``stealth_mode`` is documented as "app name and elapsed time only".
+
+    Regression test: the activity label used to reach Discord through the
+    large-text line (``"Hermes Agent — Running Terminal Command"``) even though
+    the details and state lines were blanked, so opting into stealth mode still
+    published what the agent was doing.
+    """
+    payload = _publish_status(plugin, monkeypatch, status, stealth_mode=True)
+
+    assert payload["details"] is None
+    assert payload["state"] is None
+    assert payload["large_text"] == "Hermes Agent"
+
+
+def test_hide_tool_status_suppresses_the_label_everywhere(plugin, monkeypatch):
+    """``hide_tool_status`` is documented as suppressing ``[Running ...]`` tags.
+
+    The details line honoured the toggle, but the same label kept appearing in
+    the large-text line, so the tool name stayed visible to other Discord users.
+    """
+    payload = _publish_status(plugin, monkeypatch, "Running Terminal Command", hide_tool_status=True)
+
+    assert "Running Terminal Command" not in (payload["details"] or "")
+    assert "Running Terminal Command" not in payload["large_text"]
+
+
+def test_hide_tool_status_keeps_a_neutral_status(plugin, monkeypatch):
+    """``hide_tool_status`` covers ``[Running ...]`` tags, not lifecycle words.
+
+    "Active" and "Thinking" name no tool, so they stay on the large-text line.
+    """
+    for status in ("Active", "Thinking", "Processing"):
+        payload = _publish_status(plugin, monkeypatch, status, hide_tool_status=True)
+        assert payload["large_text"] == f"Hermes Agent — {status}"
+
+
+def test_default_config_still_shows_the_activity_label(plugin, monkeypatch):
+    """Users who have not opted into privacy keep the documented output."""
+    payload = _publish_status(plugin, monkeypatch, "Running Terminal Command")
+
+    assert payload["details"] == "[Running Terminal Command] Secret Project"
+    assert payload["large_text"] == "Hermes Agent — Running Terminal Command"
+    assert payload["state"] == "model-x • 4.2k tokens"
