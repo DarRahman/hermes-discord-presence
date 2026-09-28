@@ -616,7 +616,13 @@ def test_ownership_claim_is_scoped_per_user(plugin, monkeypatch, tmp_path):
 
     path = plugin._ownership_path()
     assert os.path.dirname(path) == str(tmp_path)
-    assert f".{os.getuid()}." in os.path.basename(path)
+    # Mirror _ownership_path()'s own scope fallback: os.getuid() does not exist on
+    # Windows, where the claim is scoped by USERNAME instead.
+    try:
+        expected_scope = str(os.getuid())
+    except AttributeError:
+        expected_scope = os.environ.get("USERNAME", "user")
+    assert f".{expected_scope}." in os.path.basename(path)
     assert plugin._read_owner() == {"token": "abc123", "stamp": 1.0}
 
 
