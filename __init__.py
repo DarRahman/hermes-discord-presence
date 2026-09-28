@@ -86,6 +86,26 @@ def _get_database_path() -> str:
     return next((path for path in candidates if os.path.exists(path)), candidates[0])
 
 
+def _resolve_profile_name() -> str:
+    """Human-readable name of the profile whose home is active.
+
+    Mirrors :func:`_get_database_path` resolution so the presence reports the
+    same profile it is reading sessions from: a named profile lives under
+    ``.../profiles/<name>``, the default profile under ``~/.hermes`` (or the
+    platform equivalent), and anything else reports its own directory name.
+    """
+    hermes_home = os.environ.get("HERMES_HOME", "").strip()
+    path = _expand_path(hermes_home) if hermes_home else _default_hermes_home()
+    path = path.rstrip(os.sep + "/")
+    name = os.path.basename(path)
+    parent = os.path.basename(os.path.dirname(path))
+    if parent == "profiles" and name:
+        return name
+    if name.startswith(".hermes") or name == "hermes":
+        return "default"
+    return name or "default"
+
+
 _CONFIG_CACHE: Dict[str, Any] = {}
 _CONFIG_MTIME: float = 0.0
 
@@ -288,6 +308,10 @@ class DiscordRPCPlugin:
                 hide_tokens = bool(privacy.get("hide_tokens", False))
                 hide_tool = bool(privacy.get("hide_tool_status", False))
                 title_mode = str(privacy.get("session_title_mode", "generic"))
+                # Opt-in: append the active profile name so machines running
+                # several profiles can tell which one pushed the presence.
+                show_profile = bool(privacy.get("show_profile", False))
+                profile_name = _resolve_profile_name() if show_profile else None
 
                 if stealth:
                     details_str = None
@@ -311,6 +335,8 @@ class DiscordRPCPlugin:
                         state_parts.append(raw_model)
                     if not hide_tokens and data["total_tokens"] > 0:
                         state_parts.append(f"{tokens_str} tokens")
+                    if profile_name:
+                        state_parts.append(f"@{profile_name}")
                     state_str = " • ".join(state_parts) if state_parts else None
 
                 details_str = _safe_truncate(details_str, 120)

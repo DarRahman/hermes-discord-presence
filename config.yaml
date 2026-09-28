@@ -12,3 +12,4 @@ privacy:
   hide_tokens: false
   hide_tool_status: false
   stealth_mode: false
+  show_profile: false

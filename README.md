@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml/badge.svg)](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml)
 [![Official Hermes Catalog](https://img.shields.io/badge/hermes--catalog-official-blueviolet)](https://hermes-agent.nousresearch.com/docs/plugins/hermes-discord-rpc)
-[![Plugin Version](https://img.shields.io/badge/version-v1.2.3-orange)](plugin.yaml)
+[![Plugin Version](https://img.shields.io/badge/version-v1.3.0-orange)](plugin.yaml)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -24,6 +24,7 @@ Officially listed in the [Hermes Agent Curated Plugin Catalog](https://hermes-ag
 - **Profile-Aware**: Automatically resolves the active profile's database (`$HERMES_HOME/state.db`) rather than defaulting to the main profile.
 - **Hold-Timer & Activity Debouncing**: Activity status indicators (e.g. `[Running Terminal Command]`, `[Running Python Kernel]`, `[Searching Files]`) are held for a minimum of 5 seconds to comply with Discord IPC rate limits and ensure readability.
 - **Reasoning Tokens Support**: Tracks total token usage including modern reasoning tokens from thinking models (Gemini 3.8 Thinking, Claude 3.7, o3).
+- **Profile Identification**: Optional `show_profile` toggle appends the active profile name (e.g. `@shorekeeper`) to the presence, so machines running several Hermes profiles can tell which one is publishing.
 - **Comprehensive Privacy Controls**: Configurable toggles to mask session titles, hide model names, omit token counters, or run in stealth mode.
 - **Safe Truncation**: Automatically trims long strings to 120 characters with ellipsis to prevent Discord 128-character IPC crashes.
 
@@ -94,6 +95,7 @@ privacy:
   hide_tokens: false          # Omit token counters
   hide_tool_status: false     # Suppress [Running ...] tool tags
   stealth_mode: false         # Minimal stealth presence (app name and elapsed time only)
+  show_profile: false         # Append "@<profile>" to the state line (resolved from $HERMES_HOME)
 ```
 
 ---

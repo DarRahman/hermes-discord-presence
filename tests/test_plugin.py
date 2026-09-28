@@ -496,3 +496,58 @@ def test_unconfigured_session_title_mode_defaults_to_generic(plugin, monkeypatch
     assert payload["details"] == "Active Session"
     assert "Confidential Restructure" not in (payload["details"] or "")
 
+
+# --------------------------------------------------------------------------
+# profile identification (show_profile)
+# --------------------------------------------------------------------------
+
+
+def test_resolve_profile_name_named_profile(plugin, isolated_home, set_hermes_home):
+    """A profile home under ``.../profiles/<name>`` reports its profile name."""
+    profile_home = isolated_home / ".hermes" / "profiles" / "shorekeeper"
+    profile_home.mkdir(parents=True)
+
+    set_hermes_home(profile_home)
+
+    assert plugin._resolve_profile_name() == "shorekeeper"
+
+
+def test_resolve_profile_name_default_home(plugin, isolated_home):
+    """Without ``HERMES_HOME`` the platform default home reports 'default'."""
+    assert plugin._resolve_profile_name() == "default"
+
+
+def test_resolve_profile_name_custom_home(plugin, isolated_home, set_hermes_home):
+    """A custom (non-profile-layout) ``HERMES_HOME`` reports its directory name."""
+    custom = isolated_home / "custom-home"
+    custom.mkdir()
+
+    set_hermes_home(custom)
+
+    assert plugin._resolve_profile_name() == "custom-home"
+
+
+def test_show_profile_appends_profile_to_state(plugin, monkeypatch, set_hermes_home):
+    """``show_profile: true`` adds ``@<profile>`` to the state line."""
+    set_hermes_home("/home/user/.hermes/profiles/work")
+    payload = _publish_status(plugin, monkeypatch, "Active", show_profile=True)
+
+    assert payload["state"] == "model-x • 4.2k tokens • @work"
+
+
+def test_show_profile_off_by_default(plugin, monkeypatch, set_hermes_home):
+    """Without the toggle the published payload is unchanged."""
+    set_hermes_home("/home/user/.hermes/profiles/work")
+    payload = _publish_status(plugin, monkeypatch, "Active")
+
+    assert payload["state"] == "model-x • 4.2k tokens"
+
+
+def test_stealth_mode_withholds_profile_name(plugin, monkeypatch, set_hermes_home):
+    """Stealth mode hides everything, including the profile name."""
+    set_hermes_home("/home/user/.hermes/profiles/work")
+    payload = _publish_status(plugin, monkeypatch, "Active", stealth_mode=True, show_profile=True)
+
+    assert payload["state"] is None
+    assert "work" not in payload["large_text"]
+
