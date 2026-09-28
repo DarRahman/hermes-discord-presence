@@ -32,3 +32,28 @@ def _load_plugin_module():
 def plugin():
     """The plugin module under test."""
     return _load_plugin_module()
+
+
+@pytest.fixture(autouse=True)
+def no_real_discord(monkeypatch, tmp_path):
+    """Never let a test reach the developer's running Discord client.
+
+    ``set_status()`` ends in ``update_presence()``, which calls ``connect()``. So a test
+    that merely pokes the status API - even one that only asserts on
+    ``current_status`` - goes looking for the real ``discord-ipc-N`` socket and, on a
+    machine with Discord running, publishes real presence. That socket lives in
+    ``XDG_RUNTIME_DIR`` (on macOS, ``$TMPDIR``), inherited from the ambient
+    environment, so this leaks by default rather than only when a test asks for it.
+
+    ``test_hold_timer_preserves_status`` did exactly this, and the leak was not merely
+    a side effect: reaching a real client made ``update_presence`` do real work, which
+    reset ``current_status`` to ``"Active"`` and failed the test's own assertion. The
+    suite therefore passed on CI (no Discord) and failed on any developer machine that
+    happened to have Discord running.
+
+    Point ``XDG_RUNTIME_DIR`` at an empty directory. ``connect()`` then finds no socket
+    and degrades to disconnected, which is the same path the plugin already takes when
+    Discord is not running. Tests exercising the connected path set their own
+    ``XDG_RUNTIME_DIR`` and stub the client, and their override wins.
+    """
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "empty-runtime"))
