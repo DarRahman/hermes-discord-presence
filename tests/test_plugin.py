@@ -8,6 +8,7 @@ out of it.
 import os
 import sqlite3
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -641,6 +642,7 @@ def test_only_the_busy_terminal_publishes_within_one_profile(plugin, monkeypatch
     # Same label => same session => same profile. Status is the only difference.
     busy = _connected_instance(plugin, monkeypatch, "shared", runtime)
     idle = _connected_instance(plugin, monkeypatch, "shared", runtime)
+    time.sleep(0.02)
 
     monkeypatch.setattr(plugin, "_plugin_instance", busy)
     plugin._on_pre_tool(tool_name="terminal")

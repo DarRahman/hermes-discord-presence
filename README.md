@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml/badge.svg)](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml)
 [![Official Hermes Catalog](https://img.shields.io/badge/hermes--catalog-official-blueviolet)](https://hermes-agent.nousresearch.com/docs/plugins/hermes-discord-rpc)
-[![Plugin Version](https://img.shields.io/badge/version-v1.2.3-orange)](plugin.yaml)
+[![Plugin Version](https://img.shields.io/badge/version-v1.2.4-orange)](plugin.yaml)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -22,6 +22,7 @@ Officially listed in the [Hermes Agent Curated Plugin Catalog](https://hermes-ag
 - **In-Process Native Execution**: Runs directly inside the Hermes Agent process using lifecycle hooks with zero background daemon overhead.
 - **Zero Setup**: Uses a pre-configured Discord Application ID (`1530932637546451074`) with default brand assets. Works immediately out of the box.
 - **Profile-Aware**: Automatically resolves the active profile's database (`$HERMES_HOME/state.db`) rather than defaulting to the main profile.
+- **Multi-Terminal Aware**: When running multiple Hermes terminals or profiles simultaneously, Discord presence automatically follows the terminal actively in use, avoiding single-slot IPC race conditions.
 - **Hold-Timer & Activity Debouncing**: Activity status indicators (e.g. `[Running Terminal Command]`, `[Running Python Kernel]`, `[Searching Files]`) are held for a minimum of 5 seconds to comply with Discord IPC rate limits and ensure readability.
 - **Reasoning Tokens Support**: Tracks total token usage including modern reasoning tokens from thinking models (Gemini 3.8 Thinking, Claude 3.7, o3).
 - **Comprehensive Privacy Controls**: Configurable toggles to mask session titles, hide model names, omit token counters, or run in stealth mode.
