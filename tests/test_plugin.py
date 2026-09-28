@@ -496,3 +496,160 @@ def test_unconfigured_session_title_mode_defaults_to_generic(plugin, monkeypatch
     assert payload["details"] == "Active Session"
     assert "Confidential Restructure" not in (payload["details"] or "")
 
+
+
+# --------------------------------------------------------------------------
+# multi-terminal ownership of the single Discord presence slot
+# --------------------------------------------------------------------------
+
+
+def _connected_instance(plugin, monkeypatch, label, runtime_dir):
+    """Build a connected instance whose rendered payload is distinct per label.
+
+    Each instance reads a different session, so its payload differs from the other
+    terminal's. That matters: the bug under test is an instance staying silent
+    because *its own* payload is unchanged while another terminal owns the slot.
+    """
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime_dir))
+    monkeypatch.setattr(
+        plugin, "_load_config",
+        lambda: {
+            "presence": {"large_image": "hermes_logo", "large_text": "Hermes Agent"},
+            "privacy": {"session_title_mode": "hidden", "hide_model": False,
+                        "hide_tokens": False, "hide_tool_status": True,
+                        "stealth_mode": False},
+        },
+    )
+    # Patched per class, not per instance: each instance reads its own label so two
+    # terminals genuinely render different payloads.
+    monkeypatch.setattr(
+        plugin.DiscordRPCPlugin,
+        "get_active_session_details",
+        lambda self: {
+            "title": f"session-{getattr(self, 'label', '?')}",
+            "model": f"model-{getattr(self, 'label', '?')}",
+            "total_tokens": 1000,
+        },
+    )
+    instance = plugin.DiscordRPCPlugin()
+    instance.label = label
+    instance.rpc = _CapturingRPC()
+    instance.is_connected = True
+    return instance
+
+
+def test_presence_follows_the_terminal_that_was_used_most_recently(plugin, monkeypatch, tmp_path):
+    """Two terminals share one Discord presence slot, so ownership must follow activity.
+
+    Discord exposes a single presence per client, so with two terminals ticking the
+    slot is decided by which one published last and then held for as long as its own
+    payload looked unchanged. Activity that does not alter the rendered payload --
+    a second message arriving while the status is still "Thinking" -- must still
+    hand the slot back to the terminal the user is actually working in.
+    """
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    first = _connected_instance(plugin, monkeypatch, "first", runtime)
+    second = _connected_instance(plugin, monkeypatch, "second", runtime)
+
+    def use(instance):
+        """Drive real lifecycle hooks against ``instance`` as the active terminal."""
+        monkeypatch.setattr(plugin, "_plugin_instance", instance)
+        plugin._on_pre_llm()
+
+    use(first)
+    first.update_presence()
+    assert len(first.rpc.updates) == 1
+    assert "model-first" in first.rpc.updates[0]["state"]
+
+    use(second)
+    second.update_presence()
+    first.update_presence()
+    assert len(first.rpc.updates) == 1, "idle terminal must not republish"
+
+    # The user works in the first terminal again. Its status and session data are
+    # identical to what it last published, so a payload-keyed de-dup alone would
+    # leave the slot showing the terminal the user moved away from.
+    use(first)
+    second.update_presence()
+    first.update_presence()
+    assert len(first.rpc.updates) == 2, "re-activated terminal must reclaim the slot"
+    assert len(second.rpc.updates) == 1, "superseded terminal must yield"
+
+
+def test_idle_terminals_do_not_thrash_the_presence_slot(plugin, monkeypatch, tmp_path):
+    """Ownership is stable while nobody is working, so no redundant IPC writes."""
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    first = _connected_instance(plugin, monkeypatch, "first", runtime)
+    second = _connected_instance(plugin, monkeypatch, "second", runtime)
+
+    first.mark_active()
+    first.update_presence()
+    second.update_presence()
+    settled = first.rpc.updates.__len__() + len(second.rpc.updates)
+
+    for _ in range(10):
+        first.update_presence()
+        second.update_presence()
+
+    assert len(first.rpc.updates) + len(second.rpc.updates) == settled
+
+
+def test_disconnect_releases_the_presence_slot(plugin, monkeypatch, tmp_path):
+    """A terminal that exits must not keep the slot from the next one."""
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    owner = _connected_instance(plugin, monkeypatch, "owner", runtime)
+    owner.mark_active()
+    owner.update_presence()
+    assert os.path.exists(plugin._ownership_path())
+
+    owner.disconnect()
+    assert not os.path.exists(plugin._ownership_path())
+
+
+def test_ownership_claim_is_scoped_per_user(plugin, monkeypatch, tmp_path):
+    """The claim lives beside the Discord IPC socket, scoped to the current user."""
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    plugin._claim_owner("abc123", 1.0)
+
+    path = plugin._ownership_path()
+    assert os.path.dirname(path) == str(tmp_path)
+    # Mirror _ownership_path()'s own scope fallback: os.getuid() does not exist on
+    # Windows, where the claim is scoped by USERNAME instead.
+    try:
+        expected_scope = str(os.getuid())
+    except AttributeError:
+        expected_scope = os.environ.get("USERNAME", "user")
+    assert f".{expected_scope}." in os.path.basename(path)
+    assert plugin._read_owner() == {"token": "abc123", "stamp": 1.0}
+
+
+def test_only_the_busy_terminal_publishes_within_one_profile(plugin, monkeypatch, tmp_path):
+    """Same profile, one terminal running a tool: the idle one must not take the slot.
+
+    Two terminals in one profile read the same session, so title/model/tokens agree and
+    the *only* difference between their payloads is ``current_status`` -- which appears
+    in both ``state_key`` and ``large_text``. A terminal running a tool therefore renders
+    "[Running Terminal Command]" while an idle sibling renders "Active Session", and both
+    decide they must publish. Measured on unfixed main, the idle sibling's write lands
+    last and Discord displays the idle status while the user is actively working.
+    """
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    # Same label => same session => same profile. Status is the only difference.
+    busy = _connected_instance(plugin, monkeypatch, "shared", runtime)
+    idle = _connected_instance(plugin, monkeypatch, "shared", runtime)
+
+    monkeypatch.setattr(plugin, "_plugin_instance", busy)
+    plugin._on_pre_tool(tool_name="terminal")
+    assert busy.current_status == "Running Terminal Command"
+    assert idle.current_status == "Active"
+
+    for _ in range(10):
+        busy.update_presence()
+        idle.update_presence()
+
+    assert len(busy.rpc.updates) == 1
+    assert idle.rpc.updates == [], "idle sibling published over the terminal in use"

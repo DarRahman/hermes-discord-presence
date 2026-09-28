@@ -1,10 +1,13 @@
 """Discord Rich Presence (RPC) plugin for Hermes Agent."""
 
+import json
 import os
 import sqlite3
 import sys
+import tempfile
 import threading
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 CLIENT_ID = "1530932637546451074"
@@ -140,6 +143,47 @@ def _ensure_xdg_runtime_dir() -> None:
         pass
 
 
+def _ownership_path() -> str:
+    """Path of the presence-ownership claim, scoped to the current OS user."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "").strip() or tempfile.gettempdir()
+    try:
+        scope = str(os.getuid())
+    except AttributeError:
+        scope = os.environ.get("USERNAME", "user")
+    return os.path.join(runtime, f"hermes-discord-rpc.{scope}.owner")
+
+
+def _read_owner() -> Optional[Dict[str, Any]]:
+    try:
+        with open(_ownership_path(), "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if isinstance(data, dict) and "token" in data and "stamp" in data:
+            return data
+    except Exception:
+        pass
+    return None
+
+
+def _claim_owner(token: str, stamp: float) -> None:
+    try:
+        path = _ownership_path()
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump({"token": token, "stamp": stamp}, handle)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def _release_owner(token: str) -> None:
+    owner = _read_owner()
+    if owner and owner.get("token") == token:
+        try:
+            os.remove(_ownership_path())
+        except OSError:
+            pass
+
+
 def _format_tokens(count: int) -> str:
     """Format token count into compact human-readable string."""
     if count >= 1_000_000:
@@ -169,6 +213,10 @@ class DiscordRPCPlugin:
         self.status_hold_until = 0.0
         self.last_state_key: Optional[str] = None
         self._lock = threading.Lock()
+        self.token = uuid.uuid4().hex[:12]
+        self.last_activity = time.time()
+        self.owns_presence = False
+        self.took_over = False
 
     def connect(self) -> bool:
         """Connect to local Discord IPC socket."""
@@ -203,6 +251,7 @@ class DiscordRPCPlugin:
                     pass
             self.is_connected = False
             self.last_state_key = None
+        _release_owner(self.token)
 
     def get_active_session_details(self, db_path: Optional[str] = None) -> Dict[str, Any]:
         """Query active session metadata from SQLite state database."""
@@ -253,6 +302,32 @@ class DiscordRPCPlugin:
             pass
 
         return details
+
+    def mark_active(self) -> None:
+        """Record that this process is the one the user is currently working in."""
+        self.last_activity = time.time()
+        self.owns_presence = False
+
+    def _resolve_ownership(self) -> bool:
+        """Decide whether this process may write the single Discord presence slot.
+
+        Discord exposes one presence per client, so with two Hermes terminals both
+        writing, the slot would be decided by tick order and then held indefinitely by
+        whichever writer the payload-keyed de-dup considered already up to date.
+        Ownership therefore follows activity: a peer keeps the slot only while no other
+        terminal has been used since, and taking the slot back forces a re-publish even
+        when this process' own payload is unchanged.
+        """
+        owner = _read_owner()
+        if owner is None:
+            self.owns_presence, self.took_over = True, True
+        elif owner.get("token") == self.token:
+            self.owns_presence, self.took_over = True, False
+        elif float(owner.get("stamp", 0)) <= self.last_activity:
+            self.owns_presence, self.took_over = True, True
+        else:
+            self.owns_presence, self.took_over = False, False
+        return self.owns_presence
 
     def set_status(self, status: str, hold: bool = False):
         """Update activity status with optional minimum hold duration."""
@@ -330,7 +405,9 @@ class DiscordRPCPlugin:
                 large_text = _safe_truncate(large_text, 120)
 
                 state_key = f"{details_str}|{state_str}|{large_text}|{self.current_status}"
-                if state_key != self.last_state_key:
+                if self._resolve_ownership() and (
+                    state_key != self.last_state_key or self.took_over
+                ):
                     self.last_state_key = state_key
                     self.rpc.update(
                         details=details_str,
@@ -339,6 +416,7 @@ class DiscordRPCPlugin:
                         large_text=large_text,
                         start=int(self.start_time),
                     )
+                    _claim_owner(self.token, time.time())
             except Exception:
                 self.is_connected = False
 
@@ -347,18 +425,22 @@ _plugin_instance = DiscordRPCPlugin()
 
 
 def _on_pre_llm(*args, **kwargs):
+    _plugin_instance.mark_active()
     _plugin_instance.set_status("Thinking", hold=True)
 
 
 def _on_pre_tool(tool_name: str = "", **kwargs):
+    _plugin_instance.mark_active()
     _plugin_instance.set_status(_format_tool_activity(tool_name), hold=True)
 
 
 def _on_post_tool(*args, **kwargs):
+    _plugin_instance.mark_active()
     _plugin_instance.set_status("Processing", hold=False)
 
 
 def _on_session_end(*args, **kwargs):
+    _plugin_instance.mark_active()
     _plugin_instance.set_status("Active", hold=False)
 
 
