@@ -655,3 +655,110 @@ def test_only_the_busy_terminal_publishes_within_one_profile(plugin, monkeypatch
 
     assert len(busy.rpc.updates) == 1
     assert idle.rpc.updates == [], "idle sibling published over the terminal in use"
+
+
+def _herdr_stub(plugin, monkeypatch, focused_pane, own_pane="wA:pM"):
+    """Serve a pane.list response with ``focused_pane`` marked focused.
+
+    ``own_pane`` is this process' HERDR_PANE_ID, which is deliberately separate from
+    the focused pane id: the question is never "what is focused" but "am I it".
+    """
+    monkeypatch.setenv("HERDR_ENV", "1")
+    monkeypatch.setenv("HERDR_PANE_ID", own_pane)
+    monkeypatch.setenv("HERDR_SOCKET_PATH", "/tmp/herdr-test.sock")
+    panes = [{"pane_id": "wA:pM", "focused": False}, {"pane_id": "wA:pD", "focused": False}]
+    if focused_pane:
+        for pane in panes:
+            if pane["pane_id"] == focused_pane:
+                pane["focused"] = True
+    monkeypatch.setattr(plugin, "_herdr_call", lambda *a, **k: {"result": {"panes": panes}})
+
+
+def test_herdr_focus_beats_last_used(plugin, monkeypatch, tmp_path):
+    """Under herdr the focused pane owns presence even if another pane ran last."""
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    looking = _connected_instance(plugin, monkeypatch, "looking", runtime)
+    other = _connected_instance(plugin, monkeypatch, "other", runtime)
+
+    _herdr_stub(plugin, monkeypatch, focused_pane="wA:pD")
+    looking.update_presence()
+    other.update_presence()
+    assert looking.rpc.updates == [] and other.rpc.updates == []
+
+    _herdr_stub(plugin, monkeypatch, focused_pane="wA:pM")
+    looking.update_presence()
+    assert len(looking.rpc.updates) == 1, "focused pane must publish"
+    assert other.rpc.updates == [], "unfocused pane published over the focused one"
+
+    # Staying focused must not republish an unchanged payload every tick.
+    looking.update_presence()
+    assert len(looking.rpc.updates) == 1, "republished while continuously focused"
+
+
+def test_herdr_unfocused_pane_leaves_presence_intact(plugin, monkeypatch, tmp_path):
+    """Focus moving to a non-Hermes pane must not blank the last Hermes presence."""
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    instance = _connected_instance(plugin, monkeypatch, "hermes", runtime)
+
+    _herdr_stub(plugin, monkeypatch, focused_pane="wA:pM")
+    instance.update_presence()
+    assert len(instance.rpc.updates) == 1
+
+    _herdr_stub(plugin, monkeypatch, focused_pane="wA:pD")
+    for _ in range(5):
+        instance.update_presence()
+    assert len(instance.rpc.updates) == 1, "presence cleared when focus left Hermes"
+
+
+def test_falls_back_to_activity_when_herdr_absent(plugin, monkeypatch, tmp_path):
+    """No herdr, or an unreachable socket: the activity rule must still own the slot."""
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    instance = _connected_instance(plugin, monkeypatch, "solo", runtime)
+    for var in ("HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH"):
+        monkeypatch.delenv(var, raising=False)
+
+    assert plugin._herdr_focus() is None
+    instance.update_presence()
+    assert len(instance.rpc.updates) == 1
+
+    monkeypatch.setenv("HERDR_ENV", "1")
+    monkeypatch.setenv("HERDR_PANE_ID", "wA:pM")
+    monkeypatch.setenv("HERDR_SOCKET_PATH", str(tmp_path / "missing.sock"))
+    assert plugin._herdr_focus() is None, "unreachable socket must not guess focus"
+    assert instance._claim_slot() is True, "activity ownership lost after herdr error"
+    assert len(instance.rpc.updates) == 1, "unchanged payload must not be republished"
+
+
+def test_herdr_focus_is_about_our_own_pane(plugin, monkeypatch):
+    """Every pane asking "is it focused?" must not all get True.
+
+    herdr's pane.current returns whichever pane the session has focused, regardless of
+    who is asking, so reading its ``focused`` flag answers nothing about the caller.
+    Measured against a live session, a process whose HERDR_PANE_ID was an unfocused
+    pane still received focused=true, which would have had every pane contending for
+    the slot at once. Ownership has to compare the focused pane id with our own.
+    """
+    _herdr_stub(plugin, monkeypatch, focused_pane="wA:pM", own_pane="wA:pM")
+    assert plugin._herdr_focus() is True
+
+    _herdr_stub(plugin, monkeypatch, focused_pane="wA:pM", own_pane="wA:pD")
+    assert plugin._herdr_focus() is False, "unfocused pane believed it was focused"
+
+    _herdr_stub(plugin, monkeypatch, focused_pane="wA:pD", own_pane="wA:pM")
+    assert plugin._herdr_focus() is False, "focus moved away; stale pane still claimed it"
+
+
+def test_herdr_focus_falls_back_when_nothing_is_focused(plugin, monkeypatch):
+    """No pane focused, or a malformed reply: fall back rather than freeze presence."""
+    _herdr_stub(plugin, monkeypatch, focused_pane=None)
+    assert plugin._herdr_focus() is None
+
+    monkeypatch.setattr(plugin, "_herdr_call", lambda *a, **k: {"result": {"panes": [
+        {"pane_id": "wA:pM", "focused": True}, {"pane_id": "wA:pD", "focused": True}]}})
+    assert plugin._herdr_focus() is None, "ambiguous multi-focus reply must not guess"
+
+    monkeypatch.setattr(plugin, "_herdr_call", lambda *a, **k: None)
+    assert plugin._herdr_focus() is None

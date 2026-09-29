@@ -2,6 +2,7 @@
 
 import json
 import os
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -184,6 +185,80 @@ def _release_owner(token: str) -> None:
             pass
 
 
+def _herdr_call(method: str, timeout: float = 0.5) -> Optional[Dict[str, Any]]:
+    """Call the herdr session socket. Returns None if herdr is not reachable.
+
+    herdr speaks newline-delimited JSON over an AF_UNIX socket and correlates
+    responses by id, so one request/response needs no framing state and no
+    background reader thread. Measured at 0.1-4.6ms per call depending on how many
+    panes the session holds, which is why this can run on the presence tick instead
+    of needing a subscription.
+    """
+    path = os.environ.get("HERDR_SOCKET_PATH", "").strip()
+    # CPython on Windows does not expose AF_UNIX at all, so resolve it by name rather
+    # than letting the attribute lookup itself be the failure mode.
+    family = getattr(socket, "AF_UNIX", None)
+    if not path or family is None:
+        return None
+    sock = None
+    try:
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.connect(path)
+        request = json.dumps({"id": f"dpc-{os.getpid()}", "method": method, "params": {}})
+        sock.sendall(request.encode("utf-8") + b"\n")
+        buffer = b""
+        while b"\n" not in buffer:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            buffer += chunk
+        if not buffer.strip():
+            return None
+        return json.loads(buffer.decode("utf-8").strip())
+    except Exception:
+        return None
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+
+def _herdr_focus() -> Optional[bool]:
+    """True when this process' pane is the one herdr reports as focused.
+
+    Returns None when herdr cannot answer, which is the signal to fall back to
+    activity-based ownership.
+
+    The focused pane must be looked up by its ``focused`` flag and then compared with
+    our own ``HERDR_PANE_ID``. ``pane.current`` looks like it answers "am I focused?",
+    but it does not: it returns whichever pane the session currently has focused,
+    regardless of who is asking. Trusting it would report True in every pane at once,
+    which is the slot contention this whole mechanism exists to avoid.
+
+    None is returned on any error, and also when no pane is focused, so an ambiguous
+    answer falls back rather than freezing presence on a guess.
+    """
+    if os.environ.get("HERDR_ENV") != "1":
+        return None
+    own_pane = os.environ.get("HERDR_PANE_ID", "").strip()
+    if not own_pane:
+        return None
+    response = _herdr_call("pane.list")
+    if not isinstance(response, dict):
+        return None
+    panes = (response.get("result") or {}).get("panes")
+    if not isinstance(panes, list):
+        return None
+    focused = [p.get("pane_id") for p in panes
+               if isinstance(p, dict) and p.get("focused") is True]
+    if len(focused) != 1:
+        return None
+    return own_pane == focused[0]
+
+
 def _format_tokens(count: int) -> str:
     """Format token count into compact human-readable string."""
     if count >= 1_000_000:
@@ -217,6 +292,7 @@ class DiscordRPCPlugin:
         self.last_activity = time.time()
         self.owns_presence = False
         self.took_over = False
+        self.herdr_focused = False
 
     def connect(self) -> bool:
         """Connect to local Discord IPC socket."""
@@ -329,6 +405,23 @@ class DiscordRPCPlugin:
             self.owns_presence, self.took_over = False, False
         return self.owns_presence
 
+    def _claim_slot(self) -> bool:
+        """Resolve ownership for this tick, preferring herdr's focus signal.
+
+        Under herdr the user can have dozens of Hermes panes, and "last one used" is a
+        poor stand-in for "the one I am looking at" -- so herdr's own focus answer wins
+        when it is available. A pane that is not focused stays silent rather than
+        clearing the slot, which leaves the last Hermes presence on screen when focus
+        moves to a plain shell pane.
+        """
+        focused = _herdr_focus()
+        if focused is None:
+            return self._resolve_ownership()
+        self.owns_presence = focused
+        self.took_over = focused and not self.herdr_focused
+        self.herdr_focused = focused
+        return focused
+
     def set_status(self, status: str, hold: bool = False):
         """Update activity status with optional minimum hold duration."""
         with self._lock:
@@ -405,7 +498,7 @@ class DiscordRPCPlugin:
                 large_text = _safe_truncate(large_text, 120)
 
                 state_key = f"{details_str}|{state_str}|{large_text}|{self.current_status}"
-                if self._resolve_ownership() and (
+                if self._claim_slot() and (
                     state_key != self.last_state_key or self.took_over
                 ):
                     self.last_state_key = state_key

@@ -57,3 +57,17 @@ def no_real_discord(monkeypatch, tmp_path):
     ``XDG_RUNTIME_DIR`` and stub the client, and their override wins.
     """
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "empty-runtime"))
+
+
+@pytest.fixture(autouse=True)
+def no_herdr_env(monkeypatch):
+    """Clear herdr's ambient pane variables for every test.
+
+    Ownership prefers herdr's focus answer when ``HERDR_ENV`` is set, so a developer
+    running the suite from inside a herdr pane would otherwise get the real focus
+    state injected into tests that are exercising the activity fallback. Tests that
+    want herdr behaviour set the variables themselves.
+    """
+    for var in ("HERDR_ENV", "HERDR_PANE_ID", "HERDR_SOCKET_PATH", "HERDR_TAB_ID",
+                "HERDR_WORKSPACE_ID", "HERDR_BIN_PATH"):
+        monkeypatch.delenv(var, raising=False)
