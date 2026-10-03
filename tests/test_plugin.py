@@ -387,15 +387,19 @@ class _CapturingRPC:
 
     def __init__(self):
         self.updates = []
+        self.cleared = False
 
     def update(self, **kwargs):
         self.updates.append(kwargs)
+
+    def clear(self):
+        self.cleared = True
 
     def close(self):
         pass
 
 
-def _publish_status(plugin, monkeypatch, status, **privacy):
+def _publish_status(plugin, monkeypatch, status, session_details=None, **privacy):
     """Publish ``status`` and return the payload Discord would have received.
 
     The plugin is put in a connected state with a captured client, so the test
@@ -414,11 +418,15 @@ def _publish_status(plugin, monkeypatch, status, **privacy):
     }
     config["privacy"].update(privacy)
 
+    details_payload = {"title": "Secret Project", "model": "model-x", "total_tokens": 4242}
+    if session_details:
+        details_payload.update(session_details)
+
     monkeypatch.setattr(plugin, "_load_config", lambda: config)
     monkeypatch.setattr(
         plugin.DiscordRPCPlugin,
         "get_active_session_details",
-        lambda self: {"title": "Secret Project", "model": "model-x", "total_tokens": 4242},
+        lambda self: details_payload,
     )
 
     instance = plugin.DiscordRPCPlugin()
@@ -496,6 +504,260 @@ def test_unconfigured_session_title_mode_defaults_to_generic(plugin, monkeypatch
 
     assert payload["details"] == "Active Session"
     assert "Confidential Restructure" not in (payload["details"] or "")
+
+
+def test_generic_mode_retains_active_session_when_tool_runs(plugin, monkeypatch):
+    """In generic mode, executing a tool produces '[Tool Name] Active Session' rather than losing 'Active Session'."""
+    payload = _publish_status(
+        plugin,
+        monkeypatch,
+        "Running Terminal Command",
+        session_title_mode="generic",
+    )
+    assert payload["details"] == "[Running Terminal Command] Active Session"
+
+
+def test_normalize_repo_url(plugin):
+    """Normalize HTTPS and SSH git remote URLs to clean web links."""
+    assert plugin._normalize_repo_url("https://github.com/DarRahman/hermes-discord-presence.git") == "https://github.com/DarRahman/hermes-discord-presence"
+    assert plugin._normalize_repo_url("git@github.com:DarRahman/hermes-discord-presence.git") == "https://github.com/DarRahman/hermes-discord-presence"
+    assert plugin._normalize_repo_url("git@gitlab.com:org/repo.git") == "https://gitlab.com/org/repo"
+    assert plugin._normalize_repo_url("ssh://git@github.com/org/repo.git") == "https://github.com/org/repo"
+    assert plugin._normalize_repo_url("https://github.com/org/repo") == "https://github.com/org/repo"
+    assert plugin._normalize_repo_url("") is None
+    assert plugin._normalize_repo_url(None) is None
+
+
+def test_parse_remote_url_from_git_config(plugin, tmp_path):
+    """Parse remote origin URL directly from .git/config without subprocess calls."""
+    repo_dir = tmp_path / "my_project"
+    git_dir = repo_dir / ".git"
+    git_dir.mkdir(parents=True)
+    config_file = git_dir / "config"
+    config_file.write_text(
+        '[core]\n\trepositoryformatversion = 0\n'
+        '[remote "origin"]\n\turl = https://github.com/DarRahman/studiio.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n'
+    )
+
+    assert plugin._parse_remote_url(str(repo_dir)) == "https://github.com/DarRahman/studiio"
+    assert plugin._parse_remote_url(str(tmp_path / "nonexistent")) is None
+    assert plugin._parse_remote_url(None) is None
+
+
+def test_git_branch_in_presence_payload(plugin, monkeypatch):
+    """git_branch is prepended to state line only when show_git_branch is True."""
+    session_data = {"git_branch": "feature/awesome", "total_tokens": 1000}
+    # Default (show_git_branch=False): branch is not shown
+    payload_default = _publish_status(plugin, monkeypatch, "Active", session_details=session_data)
+    assert "feature/awesome" not in (payload_default.get("state") or "")
+
+    # Enabled (show_git_branch=True): branch is prepended
+    payload_branch = _publish_status(plugin, monkeypatch, "Active", session_details=session_data, show_git_branch=True)
+    assert payload_branch.get("state") == "feature/awesome • model-x • 1.0k tokens"
+
+
+def test_repository_button_respects_title_mode_and_toggles(plugin, monkeypatch, tmp_path):
+    """Repository button appears only in 'full' mode with a valid remote origin URL."""
+    repo_dir = tmp_path / "repo"
+    git_dir = repo_dir / ".git"
+    git_dir.mkdir(parents=True)
+    (git_dir / "config").write_text('[remote "origin"]\n\turl = https://github.com/DarRahman/test-repo.git\n')
+
+    session_data = {"git_repo_root": str(repo_dir), "title": "My Public Work", "total_tokens": 1000}
+
+    # 1. Full mode with show_repository_button=True -> Button appears!
+    payload_full = _publish_status(
+        plugin,
+        monkeypatch,
+        "Active",
+        session_details=session_data,
+        session_title_mode="full",
+        show_repository_button=True,
+    )
+    assert payload_full.get("buttons") == [{"label": "View Repository", "url": "https://github.com/DarRahman/test-repo"}]
+
+    # 2. Generic mode with show_repository_button=True -> Button is suppressed (zero leak in generic mode)
+    payload_generic = _publish_status(
+        plugin,
+        monkeypatch,
+        "Active",
+        session_details=session_data,
+        session_title_mode="generic",
+        show_repository_button=True,
+    )
+    assert payload_generic.get("buttons") is None
+
+    # 3. Hidden mode with show_repository_button=True -> Button is suppressed
+    payload_hidden = _publish_status(
+        plugin,
+        monkeypatch,
+        "Active",
+        session_details=session_data,
+        session_title_mode="hidden",
+        show_repository_button=True,
+    )
+    assert payload_hidden.get("buttons") is None
+
+    # 4. Stealth mode -> Button is suppressed
+    payload_stealth = _publish_status(
+        plugin,
+        monkeypatch,
+        "Active",
+        session_details=session_data,
+        session_title_mode="full",
+        show_repository_button=True,
+        stealth_mode=True,
+    )
+    assert payload_stealth.get("buttons") is None
+
+    # 5. Full mode with show_repository_button=False (default) -> Button is not sent
+    payload_off = _publish_status(
+        plugin,
+        monkeypatch,
+        "Active",
+        session_details=session_data,
+        session_title_mode="full",
+        show_repository_button=False,
+    )
+    assert payload_off.get("buttons") is None
+
+    # 6. Full mode with local-only repo (no remote origin) -> Button is suppressed gracefully
+    local_dir = tmp_path / "local_only"
+    (local_dir / ".git").mkdir(parents=True)
+    payload_local = _publish_status(
+        plugin,
+        monkeypatch,
+        "Active",
+        session_details={"git_repo_root": str(local_dir)},
+        session_title_mode="full",
+        show_repository_button=True,
+    )
+    assert payload_local.get("buttons") is None
+
+
+def test_find_git_repo_root_and_read_branch(plugin, tmp_path):
+    """Fallback helpers resolve git root and branch from workspace directory."""
+    repo = tmp_path / "my_project"
+    sub = repo / "src" / "deep"
+    sub.mkdir(parents=True)
+    git_dir = repo / ".git"
+    git_dir.mkdir()
+    (git_dir / "HEAD").write_text("ref: refs/heads/develop\n", encoding="utf-8")
+
+    assert plugin._find_git_repo_root(str(sub)) == str(repo)
+    assert plugin._read_git_branch(str(repo)) == "develop"
+
+    # None cases
+    assert plugin._find_git_repo_root(None) is None
+    assert plugin._find_git_repo_root(str(tmp_path / "nonexistent")) is None
+    assert plugin._read_git_branch(None) is None
+    assert plugin._read_git_branch(str(tmp_path / "empty")) is None
+
+
+def test_truncate_label(plugin):
+    """Smart truncation truncates with ellipsis only when exceeding max_len."""
+    assert plugin._truncate_label("short", 10) == "short"
+    assert plugin._truncate_label("exactly_ten", 11) == "exactly_ten"
+    assert plugin._truncate_label("feat/v130-git-and-presence-enhancements", 16) == "feat/v130-git..."
+    assert plugin._truncate_label("hermes-discord-presence", 20) == "hermes-discord-pr..."
+    assert plugin._truncate_label("", 10) == ""
+    assert plugin._truncate_label(None, 10) == ""
+    assert plugin._truncate_label("abcde", 3) == "abc"
+
+
+def test_vscode_clean_header_layout_and_privacy_matrix(plugin, monkeypatch, tmp_path):
+    """Header line uses clean 'workspace (branch)' or 'title' without redundant prefixes."""
+    repo_dir = tmp_path / "studiio_project"
+    git_dir = repo_dir / ".git"
+    git_dir.mkdir(parents=True)
+    (git_dir / "config").write_text('[remote "origin"]\n\turl = https://github.com/DarRahman/studiio.git\n')
+
+    session_data = {
+        "git_repo_root": str(repo_dir),
+        "git_branch": "main",
+        "title": "Casual chat greeting",
+        "total_tokens": 5000,
+    }
+
+    # 1. Full mode with git repo & branch: details="studiio_project", state="main • model-x • 5.0k tokens", buttons present
+    p_full = _publish_status(
+        plugin, monkeypatch, "Active",
+        session_details=session_data,
+        session_title_mode="full",
+        show_git_branch=True,
+        show_repository_button=True,
+    )
+    assert p_full.get("details") == "studiio_project"
+    assert p_full.get("state") == "main • model-x • 5.0k tokens"
+    assert p_full.get("buttons") == [{"label": "View Repository", "url": "https://github.com/DarRahman/studiio"}]
+
+    # 2. Full mode with long workspace & long branch: workspace intact up to 45 chars, branch truncated in state
+    long_repo_dir = tmp_path / "very-long-project-workspace-name"
+    long_git = long_repo_dir / ".git"
+    long_git.mkdir(parents=True)
+    long_session = {
+        "git_repo_root": str(long_repo_dir),
+        "git_branch": "feat/v130-git-and-presence-enhancements",
+        "total_tokens": 5000,
+    }
+    p_long = _publish_status(
+        plugin, monkeypatch, "Active",
+        session_details=long_session,
+        session_title_mode="full",
+        show_git_branch=True,
+    )
+    assert p_long.get("details") == "very-long-project-workspace-name"
+    assert p_long.get("state") == "feat/v130-git... • model-x • 5.0k tokens"
+
+    # 3. Full mode in general chat (no git repo): clean title without 'Session: ' prefix
+    p_chat = _publish_status(
+        plugin, monkeypatch, "Active",
+        session_details={"title": "General Conversation with Agent", "total_tokens": 2000},
+        session_title_mode="full",
+    )
+    assert p_chat.get("details") == "General Conversation with Agent"
+    assert p_chat.get("buttons") is None
+
+    # 4. Generic mode: always 'Active Session', buttons blocked
+    p_generic = _publish_status(
+        plugin, monkeypatch, "Active",
+        session_details=session_data,
+        session_title_mode="generic",
+        show_git_branch=True,
+        show_repository_button=True,
+    )
+    assert p_generic.get("details") == "Active Session"
+    assert p_generic.get("state") == "main • model-x • 5.0k tokens"
+    assert p_generic.get("buttons") is None
+
+    # 5. Generic mode with active tool: '[Running Terminal Command] Active Session'
+    p_gen_tool = _publish_status(
+        plugin, monkeypatch, "Running Terminal Command",
+        session_details=session_data,
+        session_title_mode="generic",
+    )
+    assert p_gen_tool.get("details") == "[Running Terminal Command] Active Session"
+
+    # 6. Hidden mode: details is None, buttons blocked
+    p_hidden = _publish_status(
+        plugin, monkeypatch, "Active",
+        session_details=session_data,
+        session_title_mode="hidden",
+        show_repository_button=True,
+    )
+    assert p_hidden.get("details") is None
+    assert p_hidden.get("buttons") is None
+
+    # 7. Stealth mode: details and state are None, buttons blocked
+    p_stealth = _publish_status(
+        plugin, monkeypatch, "Active",
+        session_details=session_data,
+        stealth_mode=True,
+        show_repository_button=True,
+    )
+    assert p_stealth.get("details") is None
+    assert p_stealth.get("state") is None
+    assert p_stealth.get("buttons") is None
 
 
 
@@ -607,6 +869,7 @@ def test_disconnect_releases_the_presence_slot(plugin, monkeypatch, tmp_path):
     assert os.path.exists(plugin._ownership_path())
 
     owner.disconnect()
+    assert owner.rpc.cleared is True
     assert not os.path.exists(plugin._ownership_path())
 
 

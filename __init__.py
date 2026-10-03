@@ -268,6 +268,98 @@ def _format_tokens(count: int) -> str:
     return str(count)
 
 
+def _truncate_label(text: Optional[str], max_len: int) -> str:
+    """Truncate text to max_len with ellipsis if needed."""
+    if not text:
+        return ""
+    if len(text) <= max_len:
+        return text
+    if max_len <= 3:
+        return text[:max_len]
+    return text[: max_len - 3] + "..."
+
+
+def _normalize_repo_url(raw_url: str) -> Optional[str]:
+    """Normalize a git remote URL (HTTPS or SSH) to a clean web URL."""
+    if not raw_url:
+        return None
+    url = raw_url.strip()
+    if url.startswith("git@github.com:"):
+        url = "https://github.com/" + url[len("git@github.com:"):]
+    elif url.startswith("git@gitlab.com:"):
+        url = "https://gitlab.com/" + url[len("git@gitlab.com:"):]
+    elif url.startswith("ssh://git@github.com/"):
+        url = "https://github.com/" + url[len("ssh://git@github.com/"):]
+    elif url.startswith("ssh://git@gitlab.com/"):
+        url = "https://gitlab.com/" + url[len("ssh://git@gitlab.com/"):]
+
+    if url.endswith(".git"):
+        url = url[:-4]
+
+    if url.startswith("https://") or url.startswith("http://"):
+        return url
+    return None
+
+
+def _parse_remote_url(git_repo_root: Optional[str]) -> Optional[str]:
+    """Read .git/config directly from git_repo_root to extract remote origin URL."""
+    if not git_repo_root or not os.path.isdir(git_repo_root):
+        return None
+    config_path = os.path.join(git_repo_root, ".git", "config")
+    if not os.path.isfile(config_path):
+        return None
+    try:
+        with open(config_path, "r", encoding="utf-8", errors="ignore") as f:
+            in_remote_origin = False
+            for line in f:
+                stripped = line.strip()
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    in_remote_origin = stripped.lower() in ('[remote "origin"]', "[remote 'origin']")
+                elif in_remote_origin and "=" in stripped:
+                    key, val = stripped.split("=", 1)
+                    if key.strip().lower() == "url":
+                        return _normalize_repo_url(val.strip())
+    except Exception:
+        return None
+    return None
+
+
+def _find_git_repo_root(path: Optional[str]) -> Optional[str]:
+    """Traverse upwards from a path to find the enclosing git repository root."""
+    if not path:
+        return None
+    try:
+        curr = os.path.abspath(path)
+        while True:
+            if os.path.isdir(os.path.join(curr, ".git")):
+                return curr
+            parent = os.path.dirname(curr)
+            if parent == curr:
+                break
+            curr = parent
+    except Exception:
+        pass
+    return None
+
+
+def _read_git_branch(repo_root: Optional[str]) -> Optional[str]:
+    """Read active branch directly from .git/HEAD without invoking git CLI."""
+    if not repo_root:
+        return None
+    head_path = os.path.join(repo_root, ".git", "HEAD")
+    try:
+        if os.path.isfile(head_path):
+            with open(head_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read().strip()
+            if content.startswith("ref: refs/heads/"):
+                return content[len("ref: refs/heads/"):].strip()
+            if len(content) == 40:
+                return content[:7]
+    except Exception:
+        pass
+    return None
+
+
 class DiscordRPCPlugin:
     """Singleton managing Discord RPC connection and state lifecycle."""
 
@@ -322,6 +414,10 @@ class DiscordRPCPlugin:
         with self._lock:
             if self.rpc and self.is_connected:
                 try:
+                    self.rpc.clear()
+                except Exception:
+                    pass
+                try:
                     self.rpc.close()
                 except Exception:
                     pass
@@ -347,7 +443,8 @@ class DiscordRPCPlugin:
             try:
                 row = cursor.execute(
                     "SELECT s.title, s.model, "
-                    "       COALESCE(s.input_tokens, 0) + COALESCE(s.output_tokens, 0) + COALESCE(s.reasoning_tokens, 0) AS total_tokens "
+                    "       COALESCE(s.input_tokens, 0) + COALESCE(s.output_tokens, 0) + COALESCE(s.reasoning_tokens, 0) AS total_tokens, "
+                    "       s.git_branch, s.git_repo_root, s.cwd "
                     "FROM messages m "
                     "JOIN sessions s ON m.session_id = s.id "
                     "WHERE s.id NOT LIKE 'cron%' AND s.title IS NOT NULL AND s.model IS NOT NULL "
@@ -355,15 +452,27 @@ class DiscordRPCPlugin:
                     "ORDER BY MAX(m.timestamp) DESC LIMIT 1"
                 ).fetchone()
             except sqlite3.OperationalError:
-                row = cursor.execute(
-                    "SELECT s.title, s.model, "
-                    "       COALESCE(s.input_tokens, 0) + COALESCE(s.output_tokens, 0) AS total_tokens "
-                    "FROM messages m "
-                    "JOIN sessions s ON m.session_id = s.id "
-                    "WHERE s.id NOT LIKE 'cron%' AND s.title IS NOT NULL AND s.model IS NOT NULL "
-                    "GROUP BY s.id "
-                    "ORDER BY MAX(m.timestamp) DESC LIMIT 1"
-                ).fetchone()
+                try:
+                    row = cursor.execute(
+                        "SELECT s.title, s.model, "
+                        "       COALESCE(s.input_tokens, 0) + COALESCE(s.output_tokens, 0) AS total_tokens, "
+                        "       s.git_branch, s.git_repo_root, s.cwd "
+                        "FROM messages m "
+                        "JOIN sessions s ON m.session_id = s.id "
+                        "WHERE s.id NOT LIKE 'cron%' AND s.title IS NOT NULL AND s.model IS NOT NULL "
+                        "GROUP BY s.id "
+                        "ORDER BY MAX(m.timestamp) DESC LIMIT 1"
+                    ).fetchone()
+                except sqlite3.OperationalError:
+                    row = cursor.execute(
+                        "SELECT s.title, s.model, "
+                        "       COALESCE(s.input_tokens, 0) + COALESCE(s.output_tokens, 0) AS total_tokens "
+                        "FROM messages m "
+                        "JOIN sessions s ON m.session_id = s.id "
+                        "WHERE s.id NOT LIKE 'cron%' AND s.title IS NOT NULL AND s.model IS NOT NULL "
+                        "GROUP BY s.id "
+                        "ORDER BY MAX(m.timestamp) DESC LIMIT 1"
+                    ).fetchone()
 
             if row:
                 if row[0]:
@@ -372,6 +481,15 @@ class DiscordRPCPlugin:
                     details["model"] = str(row[1])
                 if row[2]:
                     details["total_tokens"] = int(row[2])
+                if len(row) > 3 and row[3]:
+                    details["git_branch"] = str(row[3])
+                if len(row) > 4 and row[4]:
+                    details["git_repo_root"] = str(row[4])
+                cwd = str(row[5]) if len(row) > 5 and row[5] else None
+                if not details.get("git_repo_root") and cwd:
+                    details["git_repo_root"] = _find_git_repo_root(cwd)
+                if not details.get("git_branch") and details.get("git_repo_root"):
+                    details["git_branch"] = _read_git_branch(details["git_repo_root"])
 
             conn.close()
         except Exception:
@@ -456,30 +574,54 @@ class DiscordRPCPlugin:
                 hide_tokens = bool(privacy.get("hide_tokens", False))
                 hide_tool = bool(privacy.get("hide_tool_status", False))
                 title_mode = str(privacy.get("session_title_mode", "generic"))
+                show_branch = bool(privacy.get("show_git_branch", False))
+                show_repo_button = bool(privacy.get("show_repository_button", False))
 
+                branch_placed_in_details = False
                 if stealth:
                     details_str = None
                     state_str = None
+                    buttons = None
                 else:
                     is_active_tool = (self.current_status not in ("Active", "Idle")) and not hide_tool
-                    if is_active_tool:
-                        details_str = f"[{self.current_status}]"
-                        if title_mode == "full" and title:
-                            details_str = f"[{self.current_status}] {title}"
-                    else:
-                        if title_mode == "hidden":
-                            details_str = None
-                        elif title_mode == "generic":
-                            details_str = "Active Session"
+                    branch = str(data.get("git_branch")) if data.get("git_branch") else None
+                    repo_root = str(data.get("git_repo_root")) if data.get("git_repo_root") else None
+
+                    if title_mode == "hidden":
+                        details_str = None
+                    elif title_mode == "generic":
+                        if is_active_tool:
+                            details_str = f"[{self.current_status}] Active Session"
                         else:
-                            details_str = f"Session: {title}" if title else "Active Session"
+                            details_str = "Active Session"
+                    else:
+                        if repo_root:
+                            ws_name = os.path.basename(os.path.normpath(repo_root))
+                            label = _truncate_label(ws_name, 45)
+                        elif title:
+                            label = _truncate_label(title, 45)
+                        else:
+                            label = "Active Session"
+
+                        if is_active_tool:
+                            details_str = f"[{self.current_status}] {label}"
+                        else:
+                            details_str = label
 
                     state_parts = []
+                    if show_branch and branch:
+                        state_parts.append(_truncate_label(branch, 16))
                     if not hide_model:
                         state_parts.append(raw_model)
                     if not hide_tokens and data["total_tokens"] > 0:
                         state_parts.append(f"{tokens_str} tokens")
                     state_str = " • ".join(state_parts) if state_parts else None
+
+                    buttons = None
+                    if show_repo_button and title_mode == "full" and repo_root:
+                        remote_url = _parse_remote_url(repo_root)
+                        if remote_url:
+                            buttons = [{"label": "View Repository", "url": remote_url}]
 
                 details_str = _safe_truncate(details_str, 120)
                 state_str = _safe_truncate(state_str, 120)
@@ -497,24 +639,30 @@ class DiscordRPCPlugin:
                     large_text = self.large_text_template
                 large_text = _safe_truncate(large_text, 120)
 
-                state_key = f"{details_str}|{state_str}|{large_text}|{self.current_status}"
+                buttons_key = buttons[0]["url"] if buttons else ""
+                state_key = f"{details_str}|{state_str}|{large_text}|{self.current_status}|{buttons_key}"
                 if self._claim_slot() and (
                     state_key != self.last_state_key or self.took_over
                 ):
                     self.last_state_key = state_key
-                    self.rpc.update(
-                        details=details_str,
-                        state=state_str,
-                        large_image=self.large_image,
-                        large_text=large_text,
-                        start=int(self.start_time),
-                    )
+                    update_kwargs = {
+                        "details": details_str,
+                        "state": state_str,
+                        "large_image": self.large_image,
+                        "large_text": large_text,
+                        "start": int(self.start_time),
+                    }
+                    if buttons:
+                        update_kwargs["buttons"] = buttons
+                    self.rpc.update(**update_kwargs)
                     _claim_owner(self.token, time.time())
             except Exception:
                 self.is_connected = False
 
 
 _plugin_instance = DiscordRPCPlugin()
+import atexit
+atexit.register(_plugin_instance.disconnect)
 
 
 def _on_pre_llm(*args, **kwargs):
