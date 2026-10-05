@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml/badge.svg)](https://github.com/DarRahman/hermes-discord-presence/actions/workflows/validate.yml)
 [![Official Hermes Catalog](https://img.shields.io/badge/hermes--catalog-official-blueviolet)](https://hermes-agent.nousresearch.com/docs/plugins/hermes-discord-rpc)
-[![Plugin Version](https://img.shields.io/badge/version-v1.2.5-orange)](plugin.yaml)
+[![Plugin Version](https://img.shields.io/badge/version-v1.3.0-orange)](plugin.yaml)
 [![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
@@ -11,7 +11,7 @@ Native Discord Rich Presence (RPC) integration for Hermes Agent. Displays active
 Officially listed in the [Hermes Agent Curated Plugin Catalog](https://hermes-agent.nousresearch.com/docs/plugins/hermes-discord-rpc).
 
 <p align="center">
-  <img src="assets/preview.png" alt="Hermes Discord Presence Preview" width="480">
+  <img src="assets/preview_v130_full.png" alt="Hermes Discord Presence Showcase" width="480">
 </p>
 
 ---
@@ -19,15 +19,13 @@ Officially listed in the [Hermes Agent Curated Plugin Catalog](https://hermes-ag
 ## Features
 
 - **Official Catalog Plugin**: Listed in the official [Nous Research Hermes Agent Plugin Catalog](https://hermes-agent.nousresearch.com/docs/plugins/hermes-discord-rpc).
-- **In-Process Native Execution**: Runs directly inside the Hermes Agent process using lifecycle hooks with zero background daemon overhead.
-- **Zero Setup**: Uses a pre-configured Discord Application ID (`1530932637546451074`) with default brand assets. Works immediately out of the box.
-- **Profile-Aware**: Automatically resolves the active profile's database (`$HERMES_HOME/state.db`) rather than defaulting to the main profile.
-- **Multi-Terminal Aware**: When running multiple Hermes terminals or profiles simultaneously, Discord presence automatically follows the terminal actively in use, avoiding single-slot IPC race conditions.
-- **Terminal Multiplexer Aware**: Integrates with herdr session sockets to follow the active focused pane when working across multi-pane split sessions.
-- **Hold-Timer & Activity Debouncing**: Activity status indicators (e.g. `[Running Terminal Command]`, `[Running Python Kernel]`, `[Searching Files]`) are held for a minimum of 5 seconds to comply with Discord IPC rate limits and ensure readability.
-- **Reasoning Tokens Support**: Tracks total token usage including modern reasoning tokens from thinking models (Gemini 3.8 Thinking, Claude 3.7, o3).
-- **Comprehensive Privacy Controls**: Configurable toggles to mask session titles, hide model names, omit token counters, or run in stealth mode.
-- **Safe Truncation**: Automatically trims long strings to 120 characters with ellipsis to prevent Discord 128-character IPC crashes.
+- **Live Agent Activity**: Real-time presence indicators displaying what Hermes Agent is currently doing (`[Thinking]`, `[Running Terminal Command]`, `[Reading File]`, or `Active`).
+- **Git Workspace & Branch Tracking**: Automatically displays your active repository project name and current working branch without manual configuration.
+- **Interactive Repository Button**: Adds a clickable `[View Repository]` profile button linking directly to your public GitHub or GitLab repository.
+- **Model & Token Metrics**: Shows your active AI model and live token consumption, including reasoning and thinking tokens from supported providers.
+- **Comprehensive Privacy Controls**: Configurable options to mask project titles with generic text (`Active Session`), hide model names, omit token counts, hide git branches, or run in complete stealth mode.
+- **Multi-Terminal Awareness**: Presence automatically follows the terminal or multiplexer pane (`herdr`) you are actively working in across concurrent sessions.
+- **Instant Cleanup on Exit**: Automatically clears your Discord status card the moment Hermes Agent is closed, eliminating ghost or frozen presence cards.
 
 ---
 
@@ -78,7 +76,7 @@ Configuration is managed via `config.yaml` located in your plugin directory (`~/
 ```yaml
 discord_client_id: "1530932637546451074"
 update_interval: 3.0
-hold_duration: 5.0
+hold_duration: 15.0
 
 presence:
   large_image: "hermes_logo"
@@ -87,7 +85,7 @@ presence:
 privacy:
   # Title display mode:
   # - "generic" : Show generic text ("Active Session") [Default]
-  # - "full"    : Show original session title ("Session: <title>")
+  # - "full"    : Show clean workspace name or session title ("<workspace>" or "<title>")
   # - "hidden"  : Omit title line completely (minimal 1-line layout)
   session_title_mode: "generic"
 
@@ -96,7 +94,13 @@ privacy:
   hide_tokens: false          # Omit token counters
   hide_tool_status: false     # Suppress [Running ...] tool tags
   stealth_mode: false         # Minimal stealth presence (app name and elapsed time only)
+
+  # Git Workspace & Interactive Buttons (New in v1.3.0):
+  show_git_branch: false      # Display git branch in status line (e.g. "branch • model • tokens")
+  show_repository_button: false # Display interactive [View Repository] button (only in "full" title mode with valid remote)
 ```
+
+> **Note on Profile Buttons:** Due to Discord's client-side policy, custom RPC action buttons may not be clickable when viewing your own profile popup on desktop, but are fully visible and clickable to other Discord users viewing your profile.
 
 ---
 
@@ -106,7 +110,7 @@ privacy:
 Hermes Agent Process
   │
   ├──► Lifecycle Hooks (pre_llm_call, pre_tool_call, post_tool_call, on_session_end, on_session_finalize)
-  │      └──► Updates in-memory status with hold timer (5s minimum display)
+  │      └──► Updates in-memory status with hold timer (15s configurable display)
   │
   ├──► SQLite Reader (file:state.db?mode=ro)
   │      └──► Reads active profile ($HERMES_HOME) session metadata, tokens, and reasoning tokens

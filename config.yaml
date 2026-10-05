@@ -1,6 +1,6 @@
 discord_client_id: "1530932637546451074"
 update_interval: 3.0
-hold_duration: 5.0
+hold_duration: 15.0
 
 presence:
   large_image: "hermes_logo"
@@ -12,3 +12,5 @@ privacy:
   hide_tokens: false
   hide_tool_status: false
   stealth_mode: false
+  show_git_branch: false
+  show_repository_button: false
